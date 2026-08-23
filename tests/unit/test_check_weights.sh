@@ -14,7 +14,7 @@ NON_DIT=(
   vae/minimax_h3_video_vae_fp16.safetensors
   vae/minimax_h3_audio_vae_fp32.safetensors
   loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors
-  upscale_models/SPAN2X
+  upscale_models/2x-spanx2-ch48.pth
 )
 
 mkdir -p \

@@ -3,6 +3,8 @@
 **When (UTC):** Sun Aug 23 10:26:05 PM UTC 2026 (`date -u`, Step 1)
 **Host:** spark-2a60
 **BASE_IMAGE:** `nvcr.io/nvidia/pytorch:25.12-py3`
+**COMFYUI_SHA:** `b78cec879b9460d5cb25228a83a942fb78d2cd24`
+**SPAN_FILE:** `upscale_models/2x-spanx2-ch48.pth`
 **Result:** all required checks **PASS**. Later tasks may start (`uname -m` is `aarch64`; GPU is NVIDIA GB10 / compute 12.1).
 
 ## Gate summary
@@ -232,3 +234,49 @@ Filesystem      Size  Used Avail Use% Mounted on
 ```
 
 (Step 1 snapshot before the pull was `967G` used / `2.6T` avail on the same filesystem.)
+
+---
+
+## Task 5 — SPAN 2× filename and ComfyUI pin
+
+### `SPAN_FILE`
+
+```
+upscale_models/2x-spanx2-ch48.pth
+```
+
+**Choice.** Official 2× SPAN ch48 pretrain (`spanx2_ch48`) from hongyuanyu/SPAN, hosted as `2x-spanx2-ch48.pth` on OpenModelDB.
+
+| | |
+|---|---|
+| OpenModelDB | https://openmodeldb.info/models/2x-spanx2-ch48 |
+| Direct (HEAD `Content-Length: 8942586`) | https://objectstorage.us-phoenix-1.oraclecloud.com/n/ax6ygfvpvzka/b/open-modeldb-files/o/2x-spanx2-ch48.pth |
+| Official repo | https://github.com/hongyuanyu/SPAN |
+| License | Apache-2.0 |
+| Scale | **2×** (graph is a single 2.00×: 960×544 → 1920×1088, then crop) |
+| Loader | stock ComfyUI `spandrel` / `ImageUpscaleWithModel` |
+
+**Why 2×, not 4×.** D-04/D-05 lock a single 2.00× pass. A 4× SPAN would land on 3840×2176 and need a downscale back to 1920×1088.
+
+**Why this file, not a community 2×.** Hugging Face also has 2× SPANs (`Phips/2xNomosUni_span_multijpg`, `Phips/2xHFA2kSPAN`). Those are JPEG/anime restoration finetunes. H3 frames are clean VAE decodes; degradation-trained SPANs tend to over-smooth texture that is not actually compressed. Official DIV2K PSNR `spanx2_ch48` matches D-04 (“sharper, don’t invent faces”). `oylo-io/2xSPAN_ch48_clean` is the same official weights re-packed as safetensors; the OpenModelDB `.pth` is the known-good spandrel artifact, so Task 6 should fetch that URL (not a random re-upload).
+
+Did **not** download the blob onto `~/h3-weights` (Task 6). Filename and size are from OpenModelDB + HTTP HEAD.
+
+### `COMFYUI_SHA`
+
+```
+b78cec879b9460d5cb25228a83a942fb78d2cd24
+```
+
+Pinned from `git ls-remote https://github.com/comfyanonymous/ComfyUI.git HEAD`, then a timed `git clone --filter=blob:none --single-branch` into `/tmp/comfyui-pin` (not in git).
+
+| Check | Result |
+|---|---|
+| `rev-parse HEAD` | `b78cec879b9460d5cb25228a83a942fb78d2cd24` |
+| Not `bdcb886a` | **yes** (`bdcb886a4705a03cf40f4a7226de9fc7c059fc90` is the two-clock fix) |
+| `merge-base --is-ancestor bdcb886a HEAD` | **ancestor-ok** |
+| `class MiniMaxH3ImageToVideo` | `/tmp/comfyui-pin/comfy_extras/nodes_minimax_h3.py:112` |
+| `class ModelSamplingAV` | `/tmp/comfyui-pin/comfy/model_sampling.py:328` |
+| HEAD date | 2026-08-23 (`Increase minimum pyav version. (#15827)`) |
+
+Do **not** float on `master` in the image. Clone that SHA.
