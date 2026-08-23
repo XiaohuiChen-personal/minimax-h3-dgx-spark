@@ -1,59 +1,237 @@
-# Target container contract
+# Container — build it and start it
 
-This is the intended shape of the image other DGX Spark users should be able to pull and run. It is a contract, not an implementation. Do not add a Dockerfile until the open items below are decided and a host ComfyUI run has produced one 5.17 s clip on this box.
+This page is what an implementing agent follows to write `deploy/Dockerfile` and `deploy/compose.yaml`, and what a human follows to run the image on a DGX Spark.
 
-## Goal
+The image is **not written yet**. Do not copy a random ComfyUI image from the internet and call it done. The image must match [`decisions.md`](decisions.md).
 
-One aarch64 image that reproduces the host recipe:
+## What you are building
 
-- ComfyUI new enough to include `ModelSamplingAV` (after 2026-08-06)
-- D-02 checkpoints loaded from a **host or volume mount**, not from the image layers
-- D-05 / D-07 workflow from [`../workflows/`](../workflows/) (not written yet)
-- API on **8188** so an SSH’d agent can `POST /prompt` (see [`operator.md`](operator.md))
-- Browser UI on the same port is optional
-- One GPU job at a time; ComfyUI’s queue is enough
-- Optional later: a second image for vLLM-Omni (not the first product)
+One **linux/arm64** image that:
 
-The image exists so a second Spark does not have to rediscover wheels, launch flags, and graph wiring.
+1. Starts ComfyUI on port **8188**
+2. Already has the H3 nodes, SPAN, Sage 2.2, Sol-Attn `triton_ref`, and FirstBlockCache `H3 Safe`
+3. Loads weights from a **host folder** (D-10)
+4. Serves the two locked workflows
+5. Accepts one GPU job at a time (ComfyUI’s own queue)
 
-## Hard constraints the image must respect
-
-- Platform: `linux/arm64`, GB10, compute capability 12.1, unified memory.
-- Do not bake MiniMax H3 weights. They are large, licensed, and machine-local. The container must fail clearly if the mount is missing.
-- Do not enable `--lowvram` / CPU offload. On unified memory that copies through a slow path and buys no capacity.
-- Do not depend on NVIDIA VSR / `nvidia-vfx`.
-- Prefer stock ComfyUI nodes (`spandrel` / SPAN) over custom CUDA extensions. SageAttention is an opt-in acceleration, not a required first image.
-
-## Proposed runtime shape (not implemented)
+The browser UI on 8188 is optional. The product is `POST /prompt`.
 
 ```text
-docker run --gpus all \
-  -p 8188:8188 \
-  -v /path/to/h3-weights:/models:ro \
-  -v /path/to/outputs:/output \
-  <image>
+Spark host
+  ~/h3-weights   ──ro──►  /opt/ComfyUI/models
+  ~/h3-output    ──rw──►  /opt/ComfyUI/output
+  ~/h3-data      ──ro──►  /data          (optional first/last-frame pictures)
+
+docker compose up  →  ComfyUI :8188  →  agent POST /prompt  →  ~/h3-output/*.mp4
 ```
 
-| Mount | Purpose |
-|---|---|
-| `/models` | DiT, text encoder, VAEs, optional Turbo LoRA, SPAN weights |
-| `/output` | Generated mp4 / audio |
-| `/data` (optional) | First/last-frame images for the FL2VA node (not “generated” by the VAE) |
+## What the image contains vs what it must not
 
-Exact host paths, compose file names, and NGC vs local build are still open.
+| In the image | On the host (mounted) | Never |
+|---|---|---|
+| NVIDIA GPU PyTorch (CUDA 13, aarch64) | D-02 MiniMax files (~52 GiB) | MiniMax weights in a layer |
+| ComfyUI at a pinned SHA (D-11) | SPAN upscale file | x86_64 build |
+| Sol-Attn + H3 FirstBlockCache nodes | Optional keyframe pictures | `--lowvram` |
+| SageAttention 2.2.0 wheel | Generated mp4s | SageAttention 3 |
+| Locked workflow JSON + scripts | | Silent weight download |
 
-## Open decisions (block the Dockerfile)
+## Host folder layout
 
-1. **Base image.** NVIDIA Spark / NGC PyTorch with CUDA 13, vs a slimmer ComfyUI community ARM image. Must provide `torch` that actually uses the GPU — system Python on this box is CPU-only and is a known trap.
-2. **Weight acquisition.** Documented `huggingface-cli` download into the mount vs a helper in [`../scripts/`](../scripts/). Never a silent download into the image.
-3. **ComfyUI pin.** Commit or release newer than `bdcb886a`, recorded here and in the image labels.
-4. **Default workflow.** One FL2VA graph at 960×544 / 8.00 s / 8 steps, plus a 5.17 s smoke-test graph. Turbo 4-step is not the default.
-5. **Acceleration set.** SageAttention 2.2.0 imports and runs on this GB10 (kernel-level). Still untested inside a full H3 graph. First image may ship stock attention; a later tag or build-arg adds Sage 2.2 + Sol-Attn `triton_ref`.
-6. **Network API.** ComfyUI’s own `POST /prompt` is the product (D-08). Browser UI is optional. A FastAPI shim and vLLM-Omni are later, only if this becomes multi-user.
-7. **License acknowledgement.** The entrypoint should refuse to start unless the operator has confirmed the H3 Community License / excluded-territory status. Mechanism TBD (env flag vs mounted notice).
+Create this tree **before** the first `compose up`. The download script (next implementation step) should create it.
 
-## What the first image is not
+```text
+~/h3-weights/
+  diffusion_models/
+    minimax_h3_fl2va_pruned_fp8_scaled.safetensors
+  text_encoders/
+    qwen3vl_32b_minimax_h3_int8_convrot.safetensors
+  vae/
+    minimax_h3_video_vae_fp16.safetensors
+    minimax_h3_audio_vae_fp32.safetensors
+  loras/
+    minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors
+  upscale_models/
+    <SPAN 2× checkpoint — record the exact filename in the download script>
+```
+
+Source for the MiniMax files: [huggingface.co/Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3).
+
+The entrypoint checks those **MiniMax** paths. If any file is missing, it prints the missing names and exits. It does not start ComfyUI.
+
+`~/h3-output` and `~/h3-data` may start empty.
+
+## Dockerfile contract (what to write later)
+
+Implement in `deploy/Dockerfile`. Do not put the file in `docs/`.
+
+1. `FROM` the NGC PyTorch tag chosen at implement time (D-09). Platform `linux/arm64`.
+2. Confirm inside the build, or in a documented first-run check, that `python -c "import torch; assert torch.cuda.is_available()"`.
+3. Clone ComfyUI at the pinned SHA (D-11) into `/opt/ComfyUI`.
+4. Install Python deps with the **image’s** Python, never `/usr/bin/python3` from the Spark host.
+5. Install SageAttention **2.2.0** for `sm_121` / `sm_121a`. Do not install 3.x.
+6. Install custom nodes:
+   - Sol-Attn (ComfyUI node pack that can select kernel `triton_ref`)
+   - H3 FirstBlockCache (preset `H3 Safe`)
+   - Only other nodes the locked workflows actually call (for example a video-combine node if stock save-video is not enough)
+7. Copy `workflows/*.json` and `scripts/*` into the image.
+8. `EXPOSE 8188`.
+9. `ENTRYPOINT` a small script that:
+   - runs the weight-file check (D-10)
+   - starts ComfyUI with the launch flags below
+   - does **not** require a license env flag (D-13)
+10. Labels: `comfyui.git_sha`, `base.image`, `h3.decision_set=D-01..D-14`.
+
+### Launch flags (required)
+
+```text
+python main.py --listen 0.0.0.0 --port 8188 \
+  --fast fp8_matrix_mult --disable-pinned-memory
+```
+
+### Launch flags (forbidden)
+
+```text
+--lowvram
+--novram
+--use-sage-attention
+```
+
+Sage is a **package + workflow path**, not that flag.
+
+## Compose contract
+
+Implement in `deploy/compose.yaml`:
+
+```yaml
+# Shape only — write the real file at implement time.
+services:
+  comfyui:
+    image: h3-spark:local
+    build: .
+    gpus: all
+    ports:
+      - "8188:8188"
+    volumes:
+      - ${H3_WEIGHTS:-${HOME}/h3-weights}:/opt/ComfyUI/models:ro
+      - ${H3_OUTPUT:-${HOME}/h3-output}:/opt/ComfyUI/output
+      - ${H3_DATA:-${HOME}/h3-data}:/data:ro
+    restart: unless-stopped
+```
+
+If mounting the **whole** `models` directory hides ComfyUI’s stock extra files, prefer mounting **only** the subfolders listed in the host tree (`diffusion_models`, `text_encoders`, `vae`, `loras`, `upscale_models`). Pick one scheme at implement time and document it in `deploy/README.md`. Do not mix both.
+
+One service. One GPU. No scale-out.
+
+## Deploy instructions (human or agent, on a Spark)
+
+Do this on the **DGX Spark**, not on a laptop.
+
+### 0. Confirm the box
+
+```bash
+uname -m          # must print aarch64
+nvidia-smi        # must see the GB10
+```
+
+You need Docker with the NVIDIA Container Toolkit, and permission to use the GPU (`--gpus all`).
+
+### 1. Get this repository
+
+```bash
+git clone https://github.com/XiaohuiChen-personal/minimax-h3-dgx-spark.git
+cd minimax-h3-dgx-spark
+```
+
+### 2. Download weights onto the host
+
+After the download script exists:
+
+```bash
+mkdir -p "$HOME/h3-weights" "$HOME/h3-output" "$HOME/h3-data"
+./scripts/download-weights.sh "$HOME/h3-weights"
+./scripts/check-weights.sh "$HOME/h3-weights"
+```
+
+Until that script exists, download the D-02 files by hand from Comfy-Org/MiniMax-H3 into the tree above. Do not commit them. Do not put them in the image.
+
+### 3. Build the image
+
+```bash
+cd deploy
+docker compose build
+```
+
+Expect a long first build (PyTorch base + ComfyUI + Sage wheel). The image should stay well under the weight set in size. If the build is ~50 GiB, weights were baked in — that is a bug.
+
+### 4. Start the server once
+
+```bash
+docker compose up -d
+docker compose logs -f
+```
+
+Wait until ComfyUI prints that it is listening on 8188. The first start may take several minutes while it maps files. Leave it up. **Do not restart it for every video.**
+
+Health check (after the helper exists, or with curl):
+
+```bash
+curl -sS http://127.0.0.1:8188/system_stats
+```
+
+A failing start with “missing checkpoint …” means the mount is wrong. Fix the host tree. Do not download from inside the container as a workaround.
+
+### 5. Generate
+
+From another terminal on the same Spark (or SSH with `-L 8188:127.0.0.1:8188`):
+
+```bash
+./scripts/submit-prompt.sh workflows/h3-fl2va-smoke-5s17.json \
+  --prompt "A quiet kitchen, morning light, a glass of water on the table." \
+  --seed 42 \
+  --name smoke-5s17
+```
+
+The script `POST`s to `http://127.0.0.1:8188/prompt` and polls `/history/<prompt_id>` until the job finishes. First smoke test must be **5.17 s**. If that mp4 has video **and** stereo audio, then the default 8.00 s workflow is allowed.
+
+A second submit while the first is running should **queue**, not crash, and not start a second ComfyUI.
+
+### 6. Stop (only when you mean to free the GPU)
+
+```bash
+cd deploy && docker compose down
+```
+
+Stopping unloads the ~40 GiB of weights. The next start pays that cost again.
+
+## Raw `docker run` (same contract)
+
+```bash
+docker run --gpus all --name h3-comfy \
+  -p 8188:8188 \
+  -v "$HOME/h3-weights:/opt/ComfyUI/models:ro" \
+  -v "$HOME/h3-output:/opt/ComfyUI/output" \
+  -v "$HOME/h3-data:/data:ro" \
+  h3-spark:local
+```
+
+Prefer Compose so the mounts stay consistent.
+
+## What the implementing agent writes next
+
+In this order, in a later session:
+
+1. `scripts/download-weights.sh` — huggingface-cli or `huggingface_hub` into the host tree. No tokens in the file.
+2. `scripts/check-weights.sh` — exit 1 with a file list if anything required is missing.
+3. `workflows/h3-fl2va-smoke-5s17.json` and `workflows/h3-fl2va-default-8s.json` — see [`../workflows/README.md`](../workflows/README.md).
+4. `scripts/submit-prompt.sh` — patch free fields, `POST /prompt`, poll `/history`.
+5. `scripts/smoke-test.sh` — submit the 5.17 s graph; fail if the mp4 has no audio stream.
+6. `deploy/Dockerfile` + `deploy/compose.yaml` + a short `deploy/README.md` that points here.
+
+Do not start those files with a different model, canvas, or serving stack.
+
+## What this image is not
 
 - A multi-GPU or x86_64 build
 - A 2K regenerate path (`H3-Regenerate-2K` is not open-sourced)
+- A public website
 - A substitute for reading [`decisions.md`](decisions.md)

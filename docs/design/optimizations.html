@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="What to speed up on MiniMax H3 for DGX Spark, and what never to turn on.">
+<title>Optimizations — MiniMax H3 on DGX Spark</title>
+<link rel="stylesheet" href="../assets/site.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+</head>
+<body>
+
+<nav class="site-nav" aria-label="Site">
+  <div class="nav-inner">
+    <a class="brand" href="../index.html">H3 on Spark</a>
+    <div class="nav-links">
+      <a href="../briefing.html">Research</a>
+      <a href="operator.html">Operator</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="decisions.html">Decisions</a>
+      <a href="optimizations.html" class="active">Optimizations</a>
+      <a href="container.html">Container</a>
+    </div>
+  </div>
+</nav>
+
+<header class="top">
+  <div class="wrap">
+    <div class="eyebrow">
+      <span>Design</span><span>D-12</span><span>Not a buffet</span>
+    </div>
+    <h1>Go faster without breaking sound</h1>
+    <p class="standfirst">
+      Turn these on in order. Do not enable every node at maximum. That still fits in
+      memory and can still ruin the audio.
+    </p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section>
+  <div class="shead"><span class="snum">01</span><h2>Bind in this order</h2></div>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>#</th><th>Lever</th><th>First image</th><th>How</th></tr></thead>
+      <tbody>
+        <tr><td class="k">1</td><td>Smaller weights</td><td>Required</td><td>FP8 DiT + INT8 prompt reader</td></tr>
+        <tr><td class="k">2</td><td>Small frame + SPAN</td><td>Always</td><td>960×544, enlarge after. Also keeps tokens ~25k (Sage-safe)</td></tr>
+        <tr><td class="k">3</td><td>Turbo LoRA, 8 steps</td><td>Yes</td><td>Comfy-Org 8-step file on the pruned DiT</td></tr>
+        <tr><td class="k">4</td><td>SageAttention 2.2</td><td>Yes</td><td>2.2.0 wheel for this chip. Never version 3</td></tr>
+        <tr><td class="k">5</td><td>Sol-Attn</td><td>Yes, pinned</td><td>Kernel <code>triton_ref</code> only</td></tr>
+        <tr><td class="k">6</td><td>FirstBlockCache</td><td>Yes, gentle</td><td>Preset <code>H3 Safe</code>. Little skip at 8 steps is OK</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:14px">On this GB10, FP8 math was 2.09× BF16, and Sage 2.2 at an H3-like length matched correct attention (cosine 1.000) at 1.62×. No full H3 clip has been generated yet.</p>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">02</span><h2>Never turn on</h2></div>
+  <div class="box stop">
+    <div class="boxlabel">These look like free speed. They are not, on H3.</div>
+    <ul>
+      <li><strong>EasyCache</strong> — two clocks; it muffles audio. Do not pair it with FirstBlockCache.</li>
+      <li><strong>SageAttention 3</strong> — broken on GB10.</li>
+      <li><strong><code>--use-sage-attention</code></strong> as a launch flag — blind; H3 noise reports.</li>
+      <li><strong>Sol-Attn <code>flex_attention</code></strong> — wrong numbers on this chip (cosine ≈ 0.92).</li>
+      <li><strong>Turbo-SLA plus Sol-Attn</strong> — two sparsities. Pick Sol-Attn.</li>
+      <li><strong><code>--lowvram</code></strong> — slow copy on unified memory; no extra room.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">03</span><h2>Why “all at once” can still fail</h2></div>
+  <ul>
+    <li><strong>Two clocks.</strong> A cache that only watches video will lie to the audio track.</li>
+    <li><strong>Pruned AdaLN.</strong> The 8-step Comfy-Org LoRA fits the pruned DiT. The 4-step pack does not, for dialogue.</li>
+    <li><strong>Sage cliff.</strong> Some kernels emit noise above ~160k tokens. Native 1080p / 15 s is over that. 960×544 / 8 s is ~25k.</li>
+    <li><strong>Cache vs Turbo.</strong> At 8 distilled steps, FirstBlockCache may skip almost nothing. Keep <code>H3 Safe</code>. Do not promise a 4× cache win.</li>
+  </ul>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">04</span><h2>First real-clip experiment</h2></div>
+  <p class="sdek">Same seed, 5.17 s, 960×544, 8 steps. Change one thing at a time. Score picture and sound separately.</p>
+  <ol>
+    <li>Quant + SPAN only</li>
+    <li>+ Turbo 8-step</li>
+    <li>+ Sage 2.2</li>
+    <li>+ Sol-Attn <code>triton_ref</code></li>
+    <li>+ FirstBlockCache <code>H3 Safe</code></li>
+  </ol>
+  <p style="margin-top:14px">If a rung looks like noise or dead audio, stop stacking and record it.</p>
+</section>
+
+<p class="foot">Working source: <code>design/optimizations.md</code>.</p>
+
+</div>
+</body>
+</html>

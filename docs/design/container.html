@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Skeleton: Docker contract for MiniMax H3 on DGX Spark. Not implemented.">
-<title>Container (skeleton) — MiniMax H3 on DGX Spark</title>
+<meta name="description" content="How to build and start the MiniMax H3 ComfyUI image on a DGX Spark.">
+<title>Container — MiniMax H3 on DGX Spark</title>
 <link rel="stylesheet" href="../assets/site.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,6 +20,7 @@
       <a href="operator.html">Operator</a>
       <a href="architecture.html">Architecture</a>
       <a href="decisions.html">Decisions</a>
+      <a href="optimizations.html">Optimizations</a>
       <a href="container.html" class="active">Container</a>
     </div>
   </div>
@@ -28,34 +29,118 @@
 <header class="top">
   <div class="wrap">
     <div class="eyebrow">
-      <span>Design</span><span>Skeleton</span><span>No Dockerfile yet</span>
+      <span>Design</span><span>D-09…D-14</span><span>Image not built yet</span>
     </div>
-    <h1>Container contract</h1>
+    <h1>Build it and start it</h1>
     <p class="standfirst">
-      Placeholder for the Spark image other GB10 users should be able to run.
-      Open questions still block a Dockerfile.
+      One ARM64 image. Weights stay on the host. ComfyUI stays up on port 8188.
+      An implementing agent writes the Dockerfile from this page — it must not invent a different stack.
     </p>
   </div>
 </header>
 
 <div class="wrap">
-  <div class="stack col">
-    <div class="box">
-      <div class="boxlabel">This page is a skeleton</div>
-      <p>Runtime diagram, mount table, and entrypoint rules land here after the container decisions are made and a host smoke test exists. Working notes: <a href="https://github.com/XiaohuiChen-personal/minimax-h3-dgx-spark/blob/main/design/container.md">design/container.md</a>.</p>
-    </div>
-    <div class="box bw">
-      <div class="boxlabel">Still to decide</div>
-      <ul>
-        <li>Base image (NGC / Spark PyTorch vs community ComfyUI ARM)</li>
-        <li>How weights are mounted and downloaded (never baked into layers)</li>
-        <li>ComfyUI version pin (must include <code>ModelSamplingAV</code>)</li>
-        <li>Default workflow and acceleration set. API is ComfyUI <code>POST /prompt</code> (D-08); a FastAPI shim is later</li>
-        <li>License / excluded-territory acknowledgement before start</li>
-      </ul>
-    </div>
+
+<section>
+  <div class="shead"><span class="snum">01</span><h2>What you are building</h2></div>
+  <figure class="fig-plain">
+    <svg viewBox="0 0 980 170" role="img" aria-label="Host folders mount into the container.">
+      <rect x="20" y="28" width="280" height="120" rx="8" class="dbox-cold"/>
+      <text x="160" y="58" text-anchor="middle" class="dhead">Spark host</text>
+      <text x="160" y="82" text-anchor="middle" class="dlabel">~/h3-weights  (ro)</text>
+      <text x="160" y="102" text-anchor="middle" class="dlabel">~/h3-output   (rw)</text>
+      <text x="160" y="122" text-anchor="middle" class="dlabel">~/h3-data     (ro)</text>
+      <rect x="380" y="20" width="320" height="136" rx="8" class="dbox-hot"/>
+      <text x="540" y="58" text-anchor="middle" class="dhead">h3-spark:local</text>
+      <text x="540" y="82" text-anchor="middle" class="dlabel">ComfyUI :8188</text>
+      <text x="540" y="102" text-anchor="middle" class="dlabel-s">GPU torch · locked workflows</text>
+      <text x="540" y="122" text-anchor="middle" class="dlabel-s">no weights in the layer</text>
+      <rect x="760" y="40" width="200" height="96" rx="8" class="dbox-cold"/>
+      <text x="860" y="82" text-anchor="middle" class="dhead">mp4</text>
+      <text x="860" y="104" text-anchor="middle" class="dlabel-s">24 fps + 32 kHz</text>
+      <line x1="300" y1="88" x2="380" y2="88" class="dline-hot"/>
+      <line x1="700" y1="88" x2="760" y2="88" class="dline"/>
+    </svg>
+    <figcaption>The browser UI is optional. Agents POST /prompt. One GPU job at a time.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">02</span><h2>In the image vs on the host</h2></div>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>In the image</th><th>On the host</th><th>Never</th></tr></thead>
+      <tbody>
+        <tr><td>NVIDIA GPU PyTorch, CUDA 13, ARM64</td><td>D-02 MiniMax files (~52 GiB)</td><td>Weights in a layer</td></tr>
+        <tr><td>ComfyUI at a pinned SHA</td><td>SPAN file</td><td>x86_64 build</td></tr>
+        <tr><td>Sage 2.2, Sol-Attn, FBC H3 Safe</td><td>Optional keyframe pictures</td><td><code>--lowvram</code>, Sage 3</td></tr>
+        <tr><td>Locked workflow JSON + scripts</td><td>Generated mp4s</td><td>Silent download</td></tr>
+      </tbody>
+    </table>
   </div>
-  <p class="foot">Sibling pages: <a href="operator.html">Operator</a> · <a href="architecture.html">Architecture</a> · <a href="decisions.html">Decisions</a></p>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">03</span><h2>Host folder for weights</h2></div>
+  <pre class="shell">~/h3-weights/
+  diffusion_models/minimax_h3_fl2va_pruned_fp8_scaled.safetensors
+  text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors
+  vae/minimax_h3_video_vae_fp16.safetensors
+  vae/minimax_h3_audio_vae_fp32.safetensors
+  loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors
+  upscale_models/&lt;SPAN 2× file&gt;</pre>
+  <p style="margin-top:14px">Source: <code>Comfy-Org/MiniMax-H3</code>. If a required MiniMax file is missing, the container must exit and print the names.</p>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">04</span><h2>Dockerfile contract</h2></div>
+  <ol>
+    <li><code>FROM</code> official NVIDIA PyTorch, <code>linux/arm64</code>, CUDA 13. Record the tag.</li>
+    <li>Image Python must see the GPU. Never the Spark’s system Python.</li>
+    <li>Clone ComfyUI after commit <code>bdcb886a</code>. Record the SHA.</li>
+    <li>Install SageAttention 2.2.0 for this chip. Install Sol-Attn (<code>triton_ref</code>) and H3 FirstBlockCache (<code>H3 Safe</code>).</li>
+    <li>Copy workflows and scripts. <code>EXPOSE 8188</code>.</li>
+    <li>Entrypoint: check weight files, then start ComfyUI with the flags below. Do not require a license env flag (D-13).</li>
+  </ol>
+  <pre class="shell">python main.py --listen 0.0.0.0 --port 8188 \
+  --fast fp8_matrix_mult --disable-pinned-memory
+
+# forbidden: --lowvram --novram --use-sage-attention</pre>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">05</span><h2>Start it on a Spark</h2></div>
+  <p class="sdek">Do this on the DGX Spark, not on a laptop. The Dockerfile is not in the repo yet — this is the recipe the next implementation step follows.</p>
+  <ol>
+    <li><strong>Confirm the box.</strong> <code>uname -m</code> is <code>aarch64</code>. <code>nvidia-smi</code> sees the GB10. Docker can use <code>--gpus all</code>.</li>
+    <li><strong>Download weights</strong> into <code>~/h3-weights</code> (helper script, or by hand from Comfy-Org). Also create <code>~/h3-output</code> and <code>~/h3-data</code>.</li>
+    <li><strong>Build.</strong> <code>cd deploy && docker compose build</code>. If the image is ~50 GiB, weights were baked in — that is a bug.</li>
+    <li><strong>Start once.</strong> <code>docker compose up -d</code>. Wait for port 8188. Leave it up. Do not restart per video.</li>
+    <li><strong>Smoke test</strong> the 5.17 s workflow via <code>scripts/submit-prompt.sh</code>. If the mp4 has video and stereo audio, the 8.00 s default is allowed.</li>
+    <li><strong>Stop only when you mean to free the GPU.</strong> <code>docker compose down</code> unloads the models.</li>
+  </ol>
+  <pre class="shell">docker run --gpus all --name h3-comfy \
+  -p 8188:8188 \
+  -v "$HOME/h3-weights:/opt/ComfyUI/models:ro" \
+  -v "$HOME/h3-output:/opt/ComfyUI/output" \
+  -v "$HOME/h3-data:/data:ro" \
+  h3-spark:local</pre>
+  <p style="margin-top:14px">Prefer Compose so the mounts stay consistent. Image name <code>h3-spark:local</code>. Port 8188.</p>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">06</span><h2>What the next implementation writes</h2></div>
+  <ol>
+    <li><code>scripts/download-weights.sh</code> and <code>check-weights.sh</code></li>
+    <li>The two locked workflow JSON files</li>
+    <li><code>scripts/submit-prompt.sh</code> and <code>smoke-test.sh</code></li>
+    <li><code>deploy/Dockerfile</code> and <code>deploy/compose.yaml</code></li>
+  </ol>
+  <p style="margin-top:14px">Do not start those files with a different model, canvas, or serving stack.</p>
+</section>
+
+<p class="foot">Working source: <code>design/container.md</code>.</p>
+
 </div>
 </body>
 </html>

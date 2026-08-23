@@ -20,6 +20,7 @@
       <a href="operator.html" class="active">Operator</a>
       <a href="architecture.html">Architecture</a>
       <a href="decisions.html">Decisions</a>
+      <a href="optimizations.html">Optimizations</a>
       <a href="container.html">Container</a>
     </div>
   </div>
@@ -137,7 +138,7 @@
     <li><strong>Warm start.</strong> Do not start or restart ComfyUI per video.</li>
     <li><strong>Wall-clock.</strong> A warm 8.00 s job is minutes. Agents must poll or background-wait.</li>
     <li><strong>No multi-user serving.</strong> SSH-local only. vLLM-Omni is a later D-01 option.</li>
-    <li><strong>License.</strong> Confirm the H3 Community License before any generate. Outputs are restricted in excluded territories.</li>
+    <li><strong>License.</strong> The operator accepts the Community License risk (D-13). Do not block a generate on an ack flag.</li>
   </ul>
 </section>
 
@@ -152,10 +153,27 @@
     <li>Treat <code>&lt;Picture N&gt;</code> prompt tags as a substitute for wiring first/last-frame image inputs</li>
     <li>Run a separate VAE pass or another image model just to “make keyframes”</li>
     <li>Switch the graph to Ref2VA for a normal first/last-frame generate</li>
+    <li>Start a second ComfyUI because the first job is “taking too long”</li>
   </ul>
 </section>
 
-<p class="foot">Working source: <code>design/operator.md</code>. ComfyUI, the locked workflow JSON, and the submit/poll script are not built yet. Until they exist, this page is the contract, not a runnable path.</p>
+<section>
+  <div class="shead"><span class="snum">08</span><h2>HTTP contract</h2></div>
+  <p class="sdek">The submit script talks to a server that is already up. It does not start Docker.</p>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Step</th><th>Call</th></tr></thead>
+      <tbody>
+        <tr><td>Submit</td><td><code>POST /prompt</code> with the patched workflow JSON</td></tr>
+        <tr><td>Wait</td><td><code>GET /history/&lt;prompt_id&gt;</code> every few seconds — minutes, not seconds</td></tr>
+        <tr><td>Done</td><td>Return the host path under <code>~/h3-output</code></td></tr>
+        <tr><td>Busy</td><td>Another submit queues. Do not spawn a second server</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<p class="foot">Working source: <code>design/operator.md</code>. ComfyUI, the locked workflow JSON, and the submit/poll script are not built yet. Until they exist, this page is the contract, not a runnable path. Deploy recipe: <a href="container.html">Container</a>.</p>
 
 </div>
 </body>

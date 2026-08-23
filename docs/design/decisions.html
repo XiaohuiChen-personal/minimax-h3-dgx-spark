@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Skeleton: standing H3 / Spark decisions. Not finalized.">
-<title>Decisions (skeleton) — MiniMax H3 on DGX Spark</title>
+<meta name="description" content="Standing decisions D-01 to D-14 for MiniMax H3 on DGX Spark.">
+<title>Decisions — MiniMax H3 on DGX Spark</title>
 <link rel="stylesheet" href="../assets/site.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,6 +20,7 @@
       <a href="operator.html">Operator</a>
       <a href="architecture.html">Architecture</a>
       <a href="decisions.html" class="active">Decisions</a>
+      <a href="optimizations.html">Optimizations</a>
       <a href="container.html">Container</a>
     </div>
   </div>
@@ -28,33 +29,131 @@
 <header class="top">
   <div class="wrap">
     <div class="eyebrow">
-      <span>Design</span><span>Skeleton</span><span>Not finalized</span>
+      <span>Design</span><span>D-01…D-14</span><span>Build these</span>
     </div>
     <h1>Standing decisions</h1>
     <p class="standfirst">
-      Placeholder for D-01…D-07 once those items are filled in here. D-08
-      (SSH + agent + one GPU job) is already adopted on the
-      <a href="operator.html">operator page</a>.
+      An implementing agent treats these as “build this.” Do not invent a fourth stack.
+      Evidence lives in the <a href="../briefing.html">research briefing</a>.
     </p>
   </div>
 </header>
 
 <div class="wrap">
-  <div class="stack col">
-    <div class="box">
-      <div class="boxlabel">This page is a skeleton</div>
-      <p>Research suggested a starting point (ComfyUI, FP8 DiT, 960×544, 8 steps, 8.00 s). Those are <strong>not</strong> product defaults until we verify them on this box. Working list: <a href="https://github.com/XiaohuiChen-personal/minimax-h3-dgx-spark/blob/main/design/decisions.md">design/decisions.md</a>. Evidence: <a href="../briefing.html">research briefing</a>.</p>
+
+<section>
+  <div class="shead"><span class="snum">00</span><h2>How to read a status</h2></div>
+  <ul>
+    <li><strong>Adopted</strong> — build it unless new measurements reverse it.</li>
+    <li><strong>Adopted for implementation</strong> — same default; the first real clip can still reverse it.</li>
+    <li><strong>Superseded</strong> — kept so we do not repeat the mistake.</li>
+  </ul>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">01</span><h2>The list</h2></div>
+  <div class="stack">
+
+    <div class="adr">
+      <header><span class="id">D-01</span><h3>ComfyUI first</h3><span class="status s-adopt">adopted</span></header>
+      <div class="inner"><dl class="rec">
+        <dt>Do</dt><dd>Run H3 in ComfyUI. The product API is <code>POST /prompt</code> on 8188.</dd>
+        <dt>Not first</dt><dd>vLLM-Omni (little headroom, no LoRA recipe, known wedge). Fine later if this becomes a multi-user service.</dd>
+      </dl></div>
     </div>
-    <div class="box bw">
-      <div class="boxlabel">Intended contents</div>
-      <ul>
-        <li>One card per decision: status, why, what was rejected, what reverses it</li>
-        <li>Checkpoint table for the later image (D-02)</li>
-        <li>Operating-point table for canvas, steps, and length</li>
-      </ul>
+
+    <div class="adr">
+      <header><span class="id">D-02</span><h3>These exact weight files</h3><span class="status s-adopt">adopted for implementation</span></header>
+      <div class="inner">
+        <div class="scroller">
+          <table>
+            <thead><tr><th>Role</th><th>File</th></tr></thead>
+            <tbody>
+              <tr><td>DiT</td><td class="k">minimax_h3_fl2va_pruned_fp8_scaled</td></tr>
+              <tr><td>Prompt reader</td><td class="k">qwen3vl_32b_minimax_h3_int8_convrot</td></tr>
+              <tr><td>Video VAE</td><td class="k">minimax_h3_video_vae_fp16</td></tr>
+              <tr><td>Audio VAE</td><td class="k">minimax_h3_audio_vae_fp32</td></tr>
+              <tr><td>8-step LoRA</td><td class="k">minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Launch: <code>--fast fp8_matrix_mult --disable-pinned-memory</code>. Source: Comfy-Org/MiniMax-H3. Reverse if that flag does not speed up the first clip — then use the pruned BF16 DiT.</p>
+      </div>
     </div>
+
+    <div class="adr" style="opacity:.62">
+      <header><span class="id">D-03</span><h3>Native 1312×736</h3><span class="status s-super">superseded by D-05</span></header>
+      <div class="inner"><p>Optimized the upscale factor. Generating big is slower than generating small and enlarging.</p></div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-04</span><h3>SPAN to enlarge</h3><span class="status s-adopt">adopted</span></header>
+      <div class="inner"><dl class="rec">
+        <dt>Do</dt><dd>Stock ComfyUI SPAN after decode. About 6× faster than Real-ESRGAN on this Spark.</dd>
+        <dt>Not</dt><dd>Real-ESRGAN, NVIDIA VSR (no ARM), SeedVR2.</dd>
+      </dl></div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-05</span><h3>Generate 960×544, then 2×</h3><span class="status s-adopt">adopted for implementation</span></header>
+      <div class="inner"><p>Multiples of 32. Exact 2.00× to 1920×1088, crop to 1080p. Portrait: 544×960. Reverse if 2× looks soft — then 1216×672, not native 720p.</p></div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-06</span><h3>Eight steps when there is talking</h3><span class="status s-adopt">adopted for implementation</span></header>
+      <div class="inner"><p>8 steps for speech. 4 steps only for silent seed-hunting. ComfyUI newer than 2026-08-06 (<code>ModelSamplingAV</code>). Shifts 6/3 with Turbo, 12/3 without. Ask the sampler for 9 sigma points on an “8-step” LoRA.</p></div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-07</span><h3>Default length 8.00 s</h3><span class="status s-adopt">adopted</span></header>
+      <div class="inner"><p>Smoke test 5.17 s (124 frames). Everyday 8.00 s (192). Longer stories: stitch 8 s shots. “10 seconds” → <strong>10.13 s</strong> or refuse.</p></div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-08</span><h3>SSH + agent, one job at a time</h3><span class="status s-adopt">adopted — product</span></header>
+      <div class="inner"><p>Leave ComfyUI up. The agent fills a locked workflow. A second request queues. See the <a href="operator.html">operator page</a>.</p></div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-09</span><h3>NVIDIA GPU PyTorch base</h3><span class="status s-adopt">adopted</span></header>
+      <div class="inner"><p><code>FROM</code> official NVIDIA PyTorch, linux/arm64, CUDA 13. System Python is CPU-only torch — do not start there. Record the NGC tag at implement time.</p></div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-10</span><h3>Weights on the host</h3><span class="status s-adopt">adopted</span></header>
+      <div class="inner"><p>Never bake MiniMax files into the image. A download script fills <code>~/h3-weights</code>. Missing files → entrypoint exits with a list.</p></div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-11</span><h3>Pin ComfyUI after the two-clock fix</h3><span class="status s-adopt">adopted</span></header>
+      <div class="inner"><p>Commit newer than <code>bdcb886a</code> (2026-08-06). Record <code>comfyui.git_sha</code> on the image. Do not float on <code>master</code>.</p></div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-12</span><h3>First image includes the speed-ups</h3><span class="status s-adopt">adopted for implementation</span></header>
+      <div class="inner"><p>Sage 2.2, Sol-Attn <code>triton_ref</code>, FirstBlockCache <code>H3 Safe</code>, Turbo 8-step, SPAN. Never EasyCache, SA3, <code>flex_attention</code>, Turbo-SLA+Sol-Attn, or <code>--lowvram</code>. Details: <a href="optimizations.html">optimizations</a>.</p></div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-13</span><h3>Do not gate start on a license flag</h3><span class="status s-adopt">adopted</span></header>
+      <div class="inner"><p>The operator accepts the Community License risk. Start if the weight files are present. Do not require <code>H3_LICENSE_ACK</code> or an interactive prompt.</p></div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-14</span><h3>Compose names and host folders</h3><span class="status s-adopt">adopted</span></header>
+      <div class="inner"><p><code>deploy/compose.yaml</code>, image <code>h3-spark:local</code>, weights <code>~/h3-weights</code>, output <code>~/h3-output</code>, pictures <code>~/h3-data</code>, port 8188.</p></div>
+    </div>
+
   </div>
-  <p class="foot">Sibling pages: <a href="operator.html">Operator</a> · <a href="architecture.html">Architecture</a> · <a href="container.html">Container</a></p>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">02</span><h2>Not blocking the first build</h2></div>
+  <p>Still to measure on the first real clip: whether ComfyUI hits native FP8 math; pruned vs unpruned look; Sage inside a full H3 graph. If a test fails, follow that decision’s reverse line.</p>
+</section>
+
+<p class="foot">Working source: <code>design/decisions.md</code>.</p>
+
 </div>
 </body>
 </html>

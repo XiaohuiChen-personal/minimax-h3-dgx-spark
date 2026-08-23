@@ -1,14 +1,17 @@
-# `scripts/` — operators
+# `scripts/` — helpers the image and the agent call
 
-Empty on purpose. Helpers will land here after the host install path is known.
+Empty on purpose. Write these at implement time. They must follow [`../design/container.md`](../design/container.md) and [`../design/operator.md`](../design/operator.md).
 
-Expected later jobs (see [`../design/operator.md`](../design/operator.md)):
+| Script | Job |
+|---|---|
+| `download-weights.sh <dir>` | Download D-02 files (+ SPAN) into the host tree. Never into git. Never into a Docker layer. |
+| `check-weights.sh <dir>` | Exit 1 and print missing names if the tree is incomplete. |
+| `submit-prompt.sh <workflow.json> --prompt … --seed … --name …` | Patch free fields, `POST /prompt`, poll `/history/<id>`, print the output path. |
+| `smoke-test.sh` | Submit the 5.17 s graph. Fail if the mp4 has no stereo audio. |
 
-- Download D-02 checkpoints into a weights directory (not into git, not into the image).
-- Check that the weights mount contains every required file before ComfyUI starts.
-- Submit a locked workflow (`POST /prompt`) and poll `/history/<prompt_id>`.
-- Run the 5.17 s smoke-test workflow and fail if audio is missing.
+Rules:
 
-The submit/poll script is what Cursor or Claude should call. It must not start a new ComfyUI per video.
-
-Scripts should be callable both on the host and from the container entrypoint. They must not embed tokens or license keys.
+- Callable on the host and from the container.
+- Do not embed tokens or license keys.
+- Do not start or restart ComfyUI.
+- `submit-prompt.sh` is what Cursor or Claude should call.

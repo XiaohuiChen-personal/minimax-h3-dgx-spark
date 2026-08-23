@@ -1,67 +1,65 @@
-# Operator model — product end goal
+# Operator — how a person and an agent use the server
 
 **Status:** adopted (D-08)
 
-After deploy, a person SSHs into this DGX Spark (or another Spark running the same image) and asks Cursor or Claude to generate a clip. The agent does not build a new graph and does not start a new model process. It fills a **predefined ComfyUI workflow** and submits it to a **long-lived** ComfyUI server.
+After the image is running, a person SSHs into the Spark and asks Cursor or Claude to make a clip. The agent does **not** build a new graph and does **not** start a new model process. It fills a **predefined** workflow and sends it to a **ComfyUI that is already up**.
 
-This is local, single-user inference. **One GPU job at a time is the accepted limit.**
+This is local, one-user work. **One GPU job at a time is the accepted limit.**
 
-The container and host install exist so that path is repeatable. They are not implemented yet.
-
-## What the product is
+## The product, in one picture
 
 ```text
-SSH / Cursor remote
-        │
-        ▼
-   agent patches workflows/*.json
-        │
-        ▼
-   POST http://127.0.0.1:8188/prompt
-        │
-        ▼
-   ComfyUI (already running, weights resident)
-        │
-        ▼
-   output/<name>.mp4
+SSH / Cursor
+      │
+      ▼
+agent fills prompt, seed, name, optional pictures
+      │
+      ▼
+POST http://127.0.0.1:8188/prompt
+      │
+      ▼
+ComfyUI (weights already in memory)
+      │
+      ▼
+output/<name>.mp4     (24 fps + 32 kHz stereo)
 ```
 
-- ComfyUI listens on **8188**. The browser UI is optional (SSH `-L 8188:127.0.0.1:8188`). Agents use the HTTP API.
-- Workflow DAGs and locked knobs live in [`../workflows/`](../workflows/). Scripts that submit and poll live in [`../scripts/`](../scripts/).
-- Weights stay on a host or volume mount. They are never in git and never baked into the image.
+- Port **8188**. The web UI is optional (`ssh -L 8188:127.0.0.1:8188`). Agents use the HTTP API.
+- Locked graphs: [`../workflows/`](../workflows/). Submit helper: [`../scripts/`](../scripts/).
+- Weights stay on the host. Never in git. Never baked into the image.
 
-This is not vLLM chat. There is no per-token loop and no new engine per request.
+This is not a chat model. There is no word-by-word loop.
 
-## Operator steps
+## Everyday steps
 
-1. **Leave ComfyUI running.** Start it once (host service or container). Reloading ~40 GiB of weights is the expensive part. Do not restart per video.
-2. **SSH into the Spark** and open Cursor or Claude on that machine.
-3. **Ask for a generate.** Example: “Use the default 8 s FL2VA workflow. Prompt: … Seed: 42.”
-4. **The agent only changes free fields** — prompt, seed, output name, optional first/last-frame **image files** — then `POST /prompt`.
-5. **It polls `/history/<prompt_id>`** until the job finishes (minutes, not seconds) and returns the mp4 path under `output/`.
+1. **Leave ComfyUI running.** Start it once (`docker compose up -d` — see [`container.md`](container.md)). Reloading the models is the expensive part.
+2. **SSH into the Spark** and open Cursor or Claude there.
+3. **Ask for a generate.** Example: “Use the default 8 s workflow. Prompt: … Seed: 42.”
+4. **The agent only changes free fields**, then `POST /prompt` (or calls `scripts/submit-prompt.sh`).
+5. **It waits by polling** `/history/<prompt_id>` for minutes, then returns the path under `output/` (on the host: `~/h3-output`).
 
 A second `POST /prompt` while one job is running **queues**. That is fine.
 
-## What one generation does
+## What one generation does (plain language)
 
-The JSON is assembly. The denoising loop is inside one sampler node.
+The JSON is a shopping list. The hard work is inside one sampler node.
 
-**Once per job (outside the loop)**
+**Once, before the loop**
 
-1. Load DiT, Qwen3-VL-32B, VAEs, Turbo LoRA, SPAN — skipped if already resident.
-2. Condition: Qwen3-VL encodes the text prompt (LM head unused). If first/last-frame images are attached, the same `MiniMaxH3ImageToVideo` node also feeds those pixels into Qwen3-VL **and** VAE-encodes them as frozen keyframe latents.
-3. Allocate empty video + audio latents at `960×544` and a legal frame count.
+1. Load the models if they are not already in memory.
+2. Qwen3-VL reads the text. If pictures were attached, the same node also shows them to Qwen **and** compresses them with the video VAE.
+3. Make an empty video+audio workspace at 960×544 and a legal frame count.
 
-**Inside the loop (8 steps with Turbo)**
+**Eight times (the Turbo recipe)**
 
-4. Pack text, optional keyframe latents, video noise, and audio noise into one sequence.
-5. The 33B DiT denoises both streams on two flow clocks. SageAttention, Sol-Attn, and FirstBlockCache run here if the workflow enabled them.
+4. Pack text, optional keyframe numbers, video noise, and audio noise into one list.
+5. The big model guesses the remaining noise on both picture and sound. SageAttention, Sol-Attn, and FirstBlockCache run here if the workflow turned them on.
 
-**After the loop**
+**Once, after the loop**
 
-6. Decode: video VAE → frames, audio VAE → 32 kHz stereo.
-7. SPAN 2× to `1920×1088`, crop to 1080p.
-8. Mux `output/<name>.mp4`.
+6. Expand numbers back to frames and stereo sound.
+7. SPAN 2× to 1920×1088, crop to 1080p.
+8. Write `output/<name>.mp4`.
 
 ## Fixed vs free
 
@@ -69,50 +67,65 @@ The JSON is assembly. The denoising loop is inside one sampler node.
 |---|---|
 | D-02 checkpoints | Text prompt |
 | 960×544, 8 steps, SPAN 2× | Seed |
-| Legal length: 5.17 s smoke or 8.00 s default | Output filename |
-| Sampler, shifts, Sage 2.2, Sol-Attn `triton_ref`, FBC `H3 Safe` | Optional first/last-frame image files |
+| 5.17 s smoke or 8.00 s default | Output filename |
+| Sampler, shifts, Sage 2.2, Sol-Attn `triton_ref`, FBC `H3 Safe` | Optional first/last-frame **image files** |
 
-If the user asks for “10 seconds,” snap to **10.13 s** (243 frames) or refuse. Do not invent 10.00 s. Do not let the agent invent a new DAG for a normal generate.
+If the user says “10 seconds,” snap to **10.13 s** (243 frames) or refuse. Do not invent 10.00 s. Do not invent a new graph for a normal generate.
 
-## Keyframes (optional, same FL2VA graph)
+## Keyframes (optional, same graph)
 
-Default is text-only. Pictures are an extra on the same workflow, not a second product and not a separate VAE job.
+Default is text only. Pictures are extra. The VAE does not create them.
 
-The agent **attaches image files** to `first_frame` / `last_frame`. The locked node does the rest. Do not “generate keyframes with the VAE” first — the VAE only encodes and decodes.
+The agent **attaches image files** to `first_frame` / `last_frame` (files under `/data` in the container, or `~/h3-data` on the host). The locked node does the rest.
 
 | What the agent does | What the node does | Result |
 |---|---|---|
-| Wire `first_frame` / `last_frame` image files | Resize, then `clip.tokenize(prompt, images=…)` | Qwen3-VL sees the pictures as prompt vision tokens (semantics) |
-| Same files, same node | `vae.encode` → `minimax_keyframes` cond rows | Pixel lock: frame 1 / last frame *is* that image |
-| Write `<Picture 1>` in the prompt only | Nothing useful on this graph | Empty theater. Those tags belong to Ref2VA / the hosted rewriter |
+| Wire `first_frame` / `last_frame` files | Resize, then give the pixels to Qwen3-VL with the text | The prompt reader *understands* the photo |
+| Same files, same node | `vae.encode` → frozen keyframe rows | Frame 1 / last frame *is* that photo |
+| Write `<Picture 1>` in the prompt only | Nothing useful on this graph | Those tags belong to Ref2VA / MiniMax’s hosted rewriter |
 
-Attaching pictures to the prompt **does not replace** the VAE path. Prompt-only images are semantic. VAE keyframe latents are what make the opening or closing frame match. ComfyUI’s FL2VA node already does both when the image inputs are wired.
+Attaching a picture only as “prompt flavor” does **not** lock the first frame. The VAE path is what locks pixels. The official node already does both when the image inputs are wired.
 
-Do not switch to `MiniMaxH3ReferenceToVideo` or the Ref2VA DiT for a normal generate. That is a different partition and needs a restart.
+Do not switch to `MiniMaxH3ReferenceToVideo` or the Ref2VA weights for a normal generate. That is another model and needs a restart.
+
+## HTTP contract the submit script must use
+
+ComfyUI is already running.
+
+| Step | Call | Notes |
+|---|---|---|
+| Submit | `POST /prompt` with the workflow JSON | Free fields already patched |
+| Remember | JSON field `prompt_id` | |
+| Wait | `GET /history/<prompt_id>` every few seconds | Jobs take **minutes**. Do not assume one chat turn is enough. |
+| Done | History shows outputs | Return the host path under `~/h3-output` |
+| Busy | Another `POST /prompt` | Must queue, not spawn a second server |
+
+Do not start Docker, do not `docker compose restart`, and do not `kill` ComfyUI as part of a normal generate.
 
 ## Limits (accepted)
 
 | Limit | Rule |
 |---|---|
-| One GPU job at a time | Local box; a second request waits in ComfyUI’s queue |
+| One GPU job at a time | Local box; the next request waits in the queue |
 | Warm start | Do not start or restart ComfyUI per video |
-| Wall-clock | A warm 8.00 s default is minutes. Agents must poll or background-wait; they must not assume a single chat turn covers the job |
-| No multi-user serving | This product is SSH-local, not an internet API. vLLM-Omni remains a later option (D-01) |
-| License | Confirm the H3 Community License before any generate. Excluded territories include the US, EU, UK, and South Korea; the restriction covers outputs |
+| Wall-clock | A warm 8.00 s job is minutes |
+| No multi-user serving | SSH-local. vLLM-Omni is a later D-01 option |
+| License | Operator accepts the Community License risk (D-13). Do not block a generate on an ack flag |
 
 ## What the agent must not do
 
-- Download weights or embed tokens in the graph
-- Enable EasyCache, SageAttention 3, `--use-sage-attention` as a blind flag, Sol-Attn `flex_attention`, Turbo-SLA on top of Sol-Attn, or `--lowvram`
+- Download weights or put tokens in the graph
+- Enable EasyCache, SageAttention 3, a blind `--use-sage-attention` flag, Sol-Attn `flex_attention`, Turbo-SLA on top of Sol-Attn, or `--lowvram`
 - Change canvas, steps, or length except to another legal pair (5.17 / 8.00 / 10.13 / 15.08 s)
-- Treat `<Picture N>` prompt tags as a substitute for wiring first/last-frame image inputs
-- Run a separate VAE encode/decode (or another image model) just to “make keyframes”
+- Treat `<Picture N>` prompt tags as a substitute for wiring first/last-frame files
+- Run a separate VAE pass or another image model just to “make keyframes”
 - Switch the graph to Ref2VA for a normal first/last-frame generate
+- Start a second ComfyUI because the first job is “taking too long”
 
 ## Not built yet
 
-- ComfyUI host install and container
+- ComfyUI image and host install
 - `workflows/h3-fl2va-smoke-5s17.json` and `workflows/h3-fl2va-default-8s.json`
-- `scripts/` submit + poll helper the agent is supposed to call
+- `scripts/submit-prompt.sh` (and friends)
 
-Until those exist, this document is the contract, not a runnable path.
+Until those exist, this page is the contract, not a button you can press.

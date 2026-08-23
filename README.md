@@ -1,8 +1,8 @@
 # MiniMax H3 on DGX Spark
 
-A DGX Spark (GB10) project for running [MiniMax H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) — a 33B joint video-and-audio diffusion transformer — through **ComfyUI**, then packaging that stack so other Spark users can run the same recipe.
+A DGX Spark (GB10) project for running [MiniMax H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) — a 33B joint video-and-audio model — through **ComfyUI**, then packaging that stack so other Spark users can run the same recipe.
 
-The product end goal: SSH into a Spark, ask Cursor or Claude to run a **locked ComfyUI workflow**, and get an mp4. One GPU job at a time is accepted. The Docker image exists so other Spark users get the same server, workflows, and submit path. Research is published. The operator contract is adopted. Host and container deployment are not started.
+**Product:** SSH into a Spark, ask Cursor or Claude to run a locked workflow, get an mp4. One GPU job at a time. The Docker image exists so the next Spark gets the same server.
 
 This repository does **not** host model weights.
 
@@ -11,72 +11,71 @@ This repository does **not** host model weights.
 | Phase | Role | State |
 |---|---|---|
 | Research | Understand H3, measure this GB10, pick an operating point | Published |
-| Design | Lock the deployment contract before writing Docker or workflows | In progress |
-| Deploy | Host ComfyUI first, then a reusable container | Not started |
+| Design | End-to-end contract an agent can implement | Filled in |
+| Implement | Workflows, scripts, Dockerfile | Not started |
 
-**Research default (provisional):** generate at `960×544` for **8.00 s** (192 frames), 8 steps, then 2× SPAN to `1920×1088` and crop to 1080p. First smoke test: 5.17 s at the same resolution.
+**Locked operating point:** generate at `960×544` for **8.00 s** (192 frames), 8 steps, then 2× SPAN to `1920×1088` and crop to 1080p. First smoke test: **5.17 s**.
 
-Site hub: **https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/**  
-Research briefing: **https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/briefing.html**  
-Operator contract (adopted): [design/operator.md](design/operator.md) · [HTML](https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/design/operator.html)  
-Other design HTML pages are still skeletons. Working notes are in [`design/`](design/).
+Site: **https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/**
+
+If you will **implement**, read [`design/`](design/) in this order: architecture → decisions → optimizations → operator → container.
+
+If you want the **measurements**, read the [research briefing](https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/briefing.html).
 
 ## Who this is for
 
-- This machine, while we learn video-and-audio diffusion and turn the briefing into a repeatable install.
-- Later, other DGX Spark users who want the same ComfyUI + H3 path without re-deriving quantization, canvas size, step count, and ARM64 pitfalls.
-
-If you only want the findings, read the [briefing](https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/briefing.html). If you want to change a decision, start in [`design/`](design/) markdown; the HTML under `docs/design/` is filled in after a lock.
+- This machine, while we turn the design into a running image.
+- Other DGX Spark users who want the same path without re-deriving quantization, canvas, step count, and ARM64 traps.
 
 ## Repository layout
 
 ```text
-docs/         GitHub Pages site: hub, research briefing, operator page, design skeletons.
-design/       Working markdown for decisions. Promote into docs/design/ when locked.
-deploy/       Future Dockerfile, compose file, and Spark runtime notes.
-workflows/    Future locked ComfyUI graphs the agent submits (not invented per request).
-scripts/      Future download, submit/poll, smoke-test, and health-check helpers.
+docs/         GitHub Pages: hub, briefing, filled design pages.
+design/       Source of truth for implementers (markdown).
+deploy/       Future Dockerfile and compose.yaml.
+workflows/    Future locked ComfyUI graphs.
+scripts/      Future download, submit/poll, and smoke-test helpers.
 ```
 
-| Path | What belongs there | What does not |
-|---|---|---|
-| [`docs/`](docs/) | Public HTML site (briefing + design skeletons) | Dockerfiles, weights, workflow JSON |
-| [`design/`](design/) | Working notes until a decision is locked | Runnable install steps |
-| [`deploy/`](deploy/) | The image and how to start it on Spark | Research narrative |
-| [`workflows/`](workflows/) | Versioned ComfyUI graphs | One-off prompt experiments |
-| [`scripts/`](scripts/) | Automation that the image or a host install can call | Model checkpoints |
+Weights, outputs, and caches stay on the machine. They are gitignored.
 
-Weights, ComfyUI outputs, and local caches stay on the machine or in a volume. They are gitignored and will not be baked into the image.
-
-## How the pieces will fit
+## How an implementing agent should work
 
 ```text
-design/*.md  ──when locked──►  docs/design/*.html
+design/*.md  ──already locked──►  docs/design/*.html
         │
-        └──decides──►  workflows/ + scripts/  ──packaged by──►  deploy/
+        └──next session──►  workflows/ + scripts/ + deploy/
 ```
 
-1. **Design first.** Open questions that change the image (base, weight mount, ComfyUI pin, Turbo LoRA in or out) are listed in [`design/`](design/). Do not start the Dockerfile until those are explicit.
-2. **Host ComfyUI next.** Prove one 5.17 s clip on this Spark with the D-02 weights and D-05 canvas before wrapping anything.
-3. **Container last.** The image should reproduce that host recipe so an agent on another Spark can `POST /prompt` the same way. UI on 8188 is optional; the API is the product.
+1. Do **not** invent a different model, canvas, or serving stack.
+2. Write the two workflows and the scripts named in [`scripts/README.md`](scripts/README.md).
+3. Write `deploy/Dockerfile` and `deploy/compose.yaml` from [`design/container.md`](design/container.md).
+4. On the Spark: download weights to `~/h3-weights`, then `docker compose up -d`.
+5. Smoke-test 5.17 s. Then the 8.00 s default is allowed.
 
-vLLM-Omni is a later serving option, not the first deploy path. See [D-01](design/decisions.md#d-01-comfyui-first).
+vLLM-Omni is a later option, not the first path ([D-01](design/decisions.md#d-01--comfyui-first)).
 
 ## Standing decisions
 
-Full rationale and reversal conditions live in [`design/decisions.md`](design/decisions.md).
+Full cards: [`design/decisions.md`](design/decisions.md).
 
 | ID | Decision | Status |
 |---|---|---|
-| D-01 | ComfyUI first; vLLM-Omni later if an HTTP service is the priority | Adopted |
-| D-02 | FP8 DiT (`fl2va_pruned_fp8_scaled`) + INT8 ConvRot text encoder | Provisional |
-| D-03 | Native 1312×736 generate | Superseded by D-05 |
-| D-04 | SPAN for 2× upscale, not Real-ESRGAN or NVIDIA VSR | Adopted |
-| D-05 | Generate at 960×544, then 2× SPAN to 1080p | Provisional |
-| D-06 | 8 steps for dialogue; 4 steps only for silent seed-hunting | Provisional |
-| D-07 | Default clip length 8.00 s; first smoke test 5.17 s | Adopted |
-| D-08 | SSH + agent → locked workflow → long-lived ComfyUI; one GPU job at a time | Adopted |
+| D-01 | ComfyUI first; vLLM-Omni later | Adopted |
+| D-02 | FP8 DiT + INT8 text encoder, listed files | Adopted for implementation |
+| D-03 | Native 1312×736 | Superseded by D-05 |
+| D-04 | SPAN for 2× upscale | Adopted |
+| D-05 | Generate 960×544, then 2× to 1080p | Adopted for implementation |
+| D-06 | 8 steps for dialogue | Adopted for implementation |
+| D-07 | Default 8.00 s; smoke 5.17 s | Adopted |
+| D-08 | SSH + agent, one GPU job at a time | Adopted |
+| D-09 | NVIDIA GPU PyTorch CUDA 13 ARM64 base | Adopted |
+| D-10 | Weights on the host, never in the image | Adopted |
+| D-11 | Pin ComfyUI after `bdcb886a` | Adopted |
+| D-12 | Sage 2.2 + Sol-Attn `triton_ref` + FBC H3 Safe | Adopted for implementation |
+| D-13 | Do not gate start on a license flag; operator accepts the risk | Adopted |
+| D-14 | Compose file and `~/h3-weights` / `~/h3-output` | Adopted |
 
-## License gate
+## License note
 
-The MiniMax H3 Community License names the United States, EU, UK, and South Korea as excluded territories and also restricts **outputs**. Weights are not access-gated on Hugging Face. Confirm authorization before download or inference: [platform.minimax.io/h3-license](https://platform.minimax.io/h3-license).
+The MiniMax H3 Community License exists and names excluded territories and output restrictions. This operator accepts that risk. The image does not require an acknowledgement flag to start (D-13). Pointer: [platform.minimax.io/h3-license](https://platform.minimax.io/h3-license).

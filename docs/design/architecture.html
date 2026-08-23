@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Skeleton: H3 architecture on DGX Spark. Not finalized.">
-<title>Architecture (skeleton) — MiniMax H3 on DGX Spark</title>
+<meta name="description" content="Plain-language architecture: how MiniMax H3 turns a prompt into an mp4 on DGX Spark.">
+<title>Architecture — MiniMax H3 on DGX Spark</title>
 <link rel="stylesheet" href="../assets/site.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,6 +20,7 @@
       <a href="operator.html">Operator</a>
       <a href="architecture.html" class="active">Architecture</a>
       <a href="decisions.html">Decisions</a>
+      <a href="optimizations.html">Optimizations</a>
       <a href="container.html">Container</a>
     </div>
   </div>
@@ -28,33 +29,103 @@
 <header class="top">
   <div class="wrap">
     <div class="eyebrow">
-      <span>Design</span><span>Skeleton</span><span>Not finalized</span>
+      <span>Design</span><span>Locked</span><span>Plain language</span>
     </div>
-    <h1>Architecture</h1>
+    <h1>How a clip is made</h1>
     <p class="standfirst">
-      Placeholder for the H3-on-Spark mental model: how joint video-and-audio
-      diffusion differs from LLM serving, and which hardware limits the later
-      container must inherit.
+      H3 does not write a video the way a chatbot writes a sentence. It starts from
+      <b>random noise</b> and slowly turns that noise into 24 pictures per second
+      <b>and</b> stereo sound, together, in one network.
     </p>
   </div>
 </header>
 
 <div class="wrap">
-  <div class="stack col">
-    <div class="box">
-      <div class="boxlabel">This page is a skeleton</div>
-      <p>Figures (pipeline, memory fit, token packing) and the locked write-up land here after the design pass. Until then, use the <a href="../briefing.html">research briefing</a> for evidence and <a href="https://github.com/XiaohuiChen-personal/minimax-h3-dgx-spark/blob/main/design/architecture.md">design/architecture.md</a> for working notes.</p>
-    </div>
-    <div class="box bw">
-      <div class="boxlabel">Intended contents</div>
-      <ul>
-        <li>Five-stage pipeline diagram: condition → encode → pack → denoise → decode</li>
-        <li>Why there is no KV cache and why cost is steps × pixels × frames</li>
-        <li>GB10 constraints the image cannot dodge (memory, aarch64, 17n+5, multiple-of-32)</li>
-      </ul>
-    </div>
+
+<section>
+  <div class="shead"><span class="snum">01</span><h2>The product in one line</h2></div>
+  <p class="sdek">A server that is already running. An agent that only fills in the prompt.</p>
+  <div class="box compute">
+    <p>A long-lived ComfyUI on a DGX Spark holds the models in memory. You SSH in, ask Cursor or Claude, and get an <code>mp4</code> (24&nbsp;fps video + 32&nbsp;kHz stereo). <strong>One job at a time.</strong></p>
   </div>
-  <p class="foot">Sibling pages: <a href="operator.html">Operator</a> · <a href="decisions.html">Decisions</a> · <a href="container.html">Container</a></p>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">02</span><h2>Not a chatbot</h2></div>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Everyday LLM</th><th>H3 (this project)</th></tr></thead>
+      <tbody>
+        <tr><td>Writes one word at a time</td><td>Cleans the <em>whole</em> video at once, several times</td></tr>
+        <tr><td>You see words appear</td><td>Until the last pass, you only have noisy sludge</td></tr>
+        <tr><td>Remembers past words</td><td>Remembers nothing between passes</td></tr>
+        <tr><td>Cost ≈ number of words</td><td>Cost ≈ <strong>steps × picture size × length</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:14px">At 50% of the work you do <strong>not</strong> have half a video. You have a full-length clip that still looks like noise.</p>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">03</span><h2>Five stages of one job</h2></div>
+  <p class="sdek">Think of a film lab, not a chat box.</p>
+  <figure class="fig-plain">
+    <svg viewBox="0 0 980 160" role="img" aria-label="Condition, encode, pack, denoise, decode.">
+      <rect x="16" y="40" width="160" height="80" rx="8" class="dbox-cold"/>
+      <text x="96" y="74" text-anchor="middle" class="dhead">1 Read</text>
+      <text x="96" y="96" text-anchor="middle" class="dlabel-s">Qwen3-VL</text>
+      <rect x="204" y="40" width="160" height="80" rx="8" class="dbox-cold"/>
+      <text x="284" y="74" text-anchor="middle" class="dhead">2 Shrink</text>
+      <text x="284" y="96" text-anchor="middle" class="dlabel-s">two VAEs</text>
+      <rect x="392" y="40" width="160" height="80" rx="8" class="dbox-cold"/>
+      <text x="472" y="74" text-anchor="middle" class="dhead">3 Pack</text>
+      <text x="472" y="96" text-anchor="middle" class="dlabel-s">one long list</text>
+      <rect x="580" y="28" width="180" height="104" rx="8" class="dbox-hot"/>
+      <text x="670" y="74" text-anchor="middle" class="dhead">4 Clean ×8</text>
+      <text x="670" y="96" text-anchor="middle" class="dlabel-s">almost all the time</text>
+      <rect x="788" y="40" width="176" height="80" rx="8" class="dbox-cold"/>
+      <text x="876" y="74" text-anchor="middle" class="dhead">5 Grow</text>
+      <text x="876" y="96" text-anchor="middle" class="dlabel-s">VAE + SPAN → mp4</text>
+    </svg>
+    <figcaption>Only stage 4 repeats. Text and optional keyframe pictures are written once and then only read.</figcaption>
+  </figure>
+  <ol>
+    <li><strong>Read the request.</strong> Qwen3-VL-32B turns your words into numbers. It does not write the video. If you attach a first or last photo, it also looks at that photo.</li>
+    <li><strong>Shrink.</strong> Two small networks (VAEs) compress pictures and sound so the big model can chew them. If you attached photos, the video VAE also compresses them. It does not invent them.</li>
+    <li><strong>Pack.</strong> Text, optional keyframes, video noise, and audio noise sit in one list. Conditioning is other rows in that list, not a side door.</li>
+    <li><strong>Clean the noise eight times.</strong> A 33-billion-parameter model guesses what is still noise. Video and sound use two different clocks — that is why ComfyUI must be new enough for <code>ModelSamplingAV</code>.</li>
+    <li><strong>Grow back.</strong> VAEs expand to frames and stereo. SPAN doubles 960×544 to 1920×1088. Crop 8 rows to 1080p. Write the mp4.</li>
+  </ol>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">04</span><h2>Rules you cannot dodge</h2></div>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Rule</th><th>If you ignore it</th></tr></thead>
+      <tbody>
+        <tr><td>Width and height multiples of <strong>32</strong></td><td>Hard error. Native 1080p is illegal. We generate 960×544.</td></tr>
+        <tr><td>Frame count <strong>17n+5</strong> at 24 fps</td><td>“10 seconds” must be <strong>10.13 s</strong>. Legal lengths: 4.46 / 5.17 / 8.00 / 10.13 / 15.08 s.</td></tr>
+        <tr><td>~121.7 GiB shared memory</td><td>Full-precision DiT + full-precision Qwen do not fit. We use smaller number formats.</td></tr>
+        <tr><td>GB10, ARM64, compute 12.1</td><td>NVIDIA VSR does not exist here. System Python is CPU-only torch — a known trap.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">05</span><h2>What we ship first</h2></div>
+  <ul>
+    <li>Text-to-video, or first/last-frame pictures on the same graph (FL2VA)</li>
+    <li>960×544 → SPAN → 1080p</li>
+    <li>8.00 s everyday, 5.17 s smoke test</li>
+    <li>One GPU job, local SSH</li>
+  </ul>
+  <p style="margin-top:14px">Not first: Ref2VA, native 1080p, the closed 2K path, a public website, vLLM-Omni.</p>
+</section>
+
+<p class="foot">Working source: <code>design/architecture.md</code>. Numbers and file names: <a href="decisions.html">Decisions</a>. Speed-ups: <a href="optimizations.html">Optimizations</a>. How to run it: <a href="operator.html">Operator</a> · <a href="container.html">Container</a>.</p>
+
 </div>
 </body>
 </html>

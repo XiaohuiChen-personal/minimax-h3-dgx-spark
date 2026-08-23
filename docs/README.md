@@ -5,10 +5,13 @@ Published URL: https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/
 | Path | Role |
 |---|---|
 | `index.html` | Site hub |
-| `briefing.html` | Research briefing (complete) |
-| `design/operator.html` | Product end goal (D-08, adopted) |
-| `design/*.html` | Other design pages — skeletons until those items lock |
+| `briefing.html` | Research briefing (evidence) |
+| `design/architecture.html` | Plain-language pipeline |
+| `design/decisions.html` | D-01…D-14 |
+| `design/optimizations.html` | Speed-ups and bans |
+| `design/operator.html` | How a person and an agent use the server |
+| `design/container.html` | Image contract and deploy steps |
 | `assets/site.css` | Shared styles |
 | `.nojekyll` | Stops Jekyll from rewriting pages |
 
-Working notes for design stay in [`../design/`](../design/) as markdown. Update those first; promote into the HTML pages when a decision is finalized. Deploy artifacts go in [`../deploy/`](../deploy/), not here.
+Working source of truth is [`../design/`](../design/) markdown. Update markdown first, then the matching HTML. Deploy artifacts go in [`../deploy/`](../deploy/), not here.

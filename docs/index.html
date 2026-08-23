@@ -20,6 +20,7 @@
       <a href="design/operator.html">Operator</a>
       <a href="design/architecture.html">Architecture</a>
       <a href="design/decisions.html">Decisions</a>
+      <a href="design/optimizations.html">Optimizations</a>
       <a href="design/container.html">Container</a>
     </div>
   </div>
@@ -32,13 +33,14 @@
     </div>
     <h1>MiniMax H3 on DGX&nbsp;Spark</h1>
     <p class="standfirst">
-      Research, design, and later a ComfyUI container. The end goal is: SSH into a Spark,
-      ask an agent to run a locked workflow, get an mp4. One GPU job at a time.
+      Research is published. The design is filled in so an agent can implement the
+      pipeline and the Docker image. The end goal is: SSH into a Spark, ask an agent,
+      get an mp4. One GPU job at a time.
     </p>
     <div class="legend">
       <div><span class="chip c-m">Research</span> published</div>
-      <div><span class="chip c-p">Design</span> in progress</div>
-      <div><span class="chip c-s">Deploy</span> not started</div>
+      <div><span class="chip c-m">Design</span> filled in</div>
+      <div><span class="chip c-s">Implement</span> not started</div>
     </div>
   </div>
 </header>
@@ -47,37 +49,43 @@
 
 <section>
   <div class="shead"><span class="snum">01</span><h2>Read first</h2></div>
-  <p class="sdek">The briefing is the evidence. The operator page is the product end goal. Other design pages stay skeletons until those items lock.</p>
+  <p class="sdek">Start with the design if you will implement. Start with the briefing if you want the measurements.</p>
   <div class="index-grid">
-    <a class="index-card span2" href="design/operator.html">
-      <span class="chip c-m">End goal · D-08</span>
-      <h2>Operator model</h2>
-      <p>SSH in, ask Cursor or Claude, submit a locked ComfyUI workflow. One GPU job at a time is accepted. The DAG is predefined; the agent only fills prompt, seed, and filename.</p>
-      <span class="go">Open the operator contract →</span>
-    </a>
-    <a class="index-card span2" href="briefing.html">
-      <span class="chip c-m">Research</span>
-      <h2>Research briefing</h2>
-      <p>Architecture, GB10 measurements, quantization, audio-duration verdict, and a candidate 960×544 / 8.00 s operating point. This is the original Claude artifact plus later corrections.</p>
-      <span class="go">Open the briefing →</span>
-    </a>
-    <a class="index-card" href="design/architecture.html">
-      <span class="chip c-s">Design · skeleton</span>
+    <a class="index-card span2" href="design/architecture.html">
+      <span class="chip c-m">Design · start here</span>
       <h2>Architecture</h2>
-      <p>Reserved for the pipeline figures and the Spark constraints the container must inherit.</p>
-      <span class="go">Open skeleton →</span>
+      <p>Plain-language pipeline: H3 starts from noise, not from words. Five stages, hardware rules, what we ship first.</p>
+      <span class="go">Open architecture →</span>
     </a>
     <a class="index-card" href="design/decisions.html">
-      <span class="chip c-s">Design · skeleton</span>
-      <h2>Standing decisions</h2>
-      <p>Reserved for D-01…D-08 once each item is filled in on the public page. D-08 (operator model) is already adopted. Working notes stay in <code>design/</code>.</p>
-      <span class="go">Open skeleton →</span>
+      <span class="chip c-m">D-01…D-14</span>
+      <h2>Decisions</h2>
+      <p>The numbered choices an implementing agent must follow. File names, canvas, length, image base, license gate.</p>
+      <span class="go">Open decisions →</span>
     </a>
-    <a class="index-card span2" href="design/container.html">
-      <span class="chip c-s">Design · skeleton</span>
-      <h2>Container contract</h2>
-      <p>Reserved for the Docker shape other Spark users will run. No Dockerfile until the open items here are decided.</p>
-      <span class="go">Open skeleton →</span>
+    <a class="index-card" href="design/optimizations.html">
+      <span class="chip c-m">D-12</span>
+      <h2>Optimizations</h2>
+      <p>What to turn on, in order. What never to turn on (EasyCache, Sage 3, lowvram).</p>
+      <span class="go">Open optimizations →</span>
+    </a>
+    <a class="index-card" href="design/operator.html">
+      <span class="chip c-m">End goal · D-08</span>
+      <h2>Operator</h2>
+      <p>SSH in, ask an agent, POST a locked workflow. One GPU job at a time. Attach pictures; do not invent keyframes.</p>
+      <span class="go">Open operator →</span>
+    </a>
+    <a class="index-card" href="design/container.html">
+      <span class="chip c-m">Deploy recipe</span>
+      <h2>Container</h2>
+      <p>How to build and start the image on a Spark. Weights on the host. Compose up once. Leave it running.</p>
+      <span class="go">Open container →</span>
+    </a>
+    <a class="index-card span2" href="briefing.html">
+      <span class="chip c-p">Research</span>
+      <h2>Research briefing</h2>
+      <p>The measurements and corrections behind the design. Read this if you want to challenge a decision, not to implement.</p>
+      <span class="go">Open the briefing →</span>
     </a>
   </div>
 </section>
@@ -87,22 +95,22 @@
   <div class="stack col">
     <div class="box">
       <div class="stack tight phase">
-        <span class="n">01</span><strong>Design</strong><span class="chip c-p">Now</span>
-        <span></span><span>Fill the design skeletons after the remaining decisions are made.</span><span></span>
-        <span class="n">02</span><strong>Host ComfyUI</strong><span class="chip c-s">Next</span>
-        <span></span><span>One 5.17 s clip at 960×544 with audio on this Spark.</span><span></span>
-        <span class="n">03</span><strong>Container</strong><span class="chip c-s">Later</span>
-        <span></span><span>Package the proven host recipe. Weights on a volume, API on 8188, one job at a time.</span><span></span>
+        <span class="n">01</span><strong>Design</strong><span class="chip c-m">Done</span>
+        <span></span><span>Architecture, decisions, optimizations, operator, container — filled in.</span><span></span>
+        <span class="n">02</span><strong>Implement</strong><span class="chip c-p">Next</span>
+        <span></span><span>Workflows, submit/poll scripts, Dockerfile, compose file.</span><span></span>
+        <span class="n">03</span><strong>Smoke test</strong><span class="chip c-s">After that</span>
+        <span></span><span>One 5.17 s clip at 960×544 with stereo audio on this Spark.</span><span></span>
       </div>
     </div>
     <div class="box compute">
-      <div class="boxlabel">Candidate from research — not a locked default</div>
-      <p>The briefing currently recommends generate at <code>960×544</code> for 8.00 s, 8 steps, then 2× SPAN to 1080p, with a 5.17 s smoke test. That stays a research recommendation until the <a href="design/decisions.html">decisions page</a> is filled in.</p>
+      <div class="boxlabel">Locked operating point</div>
+      <p>Generate at <code>960×544</code> for 8.00 s, 8 steps, then 2× SPAN to 1080p. First smoke test: 5.17 s. See <a href="design/decisions.html">decisions</a>.</p>
     </div>
   </div>
 </section>
 
-<p class="foot">No model weights are hosted here. Confirm the MiniMax H3 Community License before download or inference — the United States, EU, UK, and South Korea are excluded territories, and the restriction covers outputs.</p>
+<p class="foot">No model weights are hosted here. A MiniMax H3 Community License exists; this operator accepts that risk and the image does not gate on an ack flag (D-13).</p>
 
 </div>
 </body>
