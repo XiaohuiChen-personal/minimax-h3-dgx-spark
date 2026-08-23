@@ -18,6 +18,7 @@
     <a class="brand" href="index.html">H3 on Spark</a>
     <div class="nav-links">
       <a href="briefing.html" class="active">Research</a>
+      <a href="design/operator.html">Operator</a>
       <a href="design/architecture.html">Architecture</a>
       <a href="design/decisions.html">Decisions</a>
       <a href="design/container.html">Container</a>
@@ -683,6 +684,16 @@
         encoder — and the diffusers docs note they are placed on <strong>the conditioner's 2 fps grid</strong>,
         a much coarser sampling than the 24 fps output.</dd></div>
     </dl>
+    <div class="box bw">
+      <div class="boxlabel">Operator contract — attach files, do not invent a VAE keyframe job</div>
+      <p>ComfyUI’s <code>MiniMaxH3ImageToVideo</code> does <em>both</em> of the first two rows when
+      <code>first_frame</code> / <code>last_frame</code> are wired: the same pixels go into Qwen3-VL
+      as prompt images <em>and</em> through the video VAE as frozen cond latents. Attaching pictures
+      to the prompt does not replace the VAE path. Writing <code>&lt;Picture N&gt;</code> in the
+      prompt without those image inputs is empty theater on this graph. The agent attaches files;
+      it does not “generate keyframes with the VAE.” See the
+      <a href="design/operator.html">operator page</a>.</p>
+    </div>
 
     <div class="box bw">
       <div class="boxlabel">The whole pipeline, in order</div>
@@ -1181,7 +1192,7 @@
         <dl class="rec">
           <dt>Why</dt><dd>4× smaller download, <strong>41 GiB resident vs 105 GiB</strong>, supports the turbo LoRA and the whole optimization ladder, and leaves ~49 GiB to experiment in.</dd>
           <dt>Rejected</dt><dd><strong>vLLM-Omni</strong> — vendor-marked <code>dgx_spark_gb10: verified</code> and gives an OpenAI-shaped API, but 7.8 GiB headroom, observed swap thrash, one DiT partition at a time, no LoRA support, and an unfixed wedge bug. FL2VA <em>does</em> serve text-to-video.</dd>
-          <dt>Reverses if</dt><dd>A production HTTP endpoint becomes the priority over experimentation — then vLLM-Omni, or ComfyUI behind a FastAPI shim.</dd>
+          <dt>Reverses if</dt><dd>Multi-user or internet serving becomes the priority over experimentation — then vLLM-Omni, or ComfyUI behind a queue shim. A local agent talking to ComfyUI <code>POST /prompt</code> is D-08, not a switch to vLLM.</dd>
         </dl>
       </div>
     </div>
@@ -1280,6 +1291,20 @@
           <dt>Rejected</dt><dd><strong>15.08 s as the default</strong> — inside the trained range, but ~55% slower and where most unusable-audio reports cluster. <strong>Native 1280×720 or 1344×768</strong> — slower than 960×544 plus SPAN, and nearer the ~1 MP few-step audio-corruption reports.</dd>
           <dt>Smoke test</dt><dd>First run: <strong>5.17 s / 124 frames</strong> at the same 960×544 / 8-step recipe. Seed-hunting may drop to 4 steps only if the clip is silent.</dd>
           <dt>Reverses if</dt><dd>A same-seed, same-step, same-resolution A/B on this box shows 8.00 s audio clearly worse than 5.17 s. Then drop the default to 5.17 s and stitch. If 2× SPAN looks soft, step generate-resolution to 1216×672, not native 720p.</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-08</span><h3>SSH + agent against a long-lived ComfyUI</h3>
+        <span class="status s-adopt">adopted — product end goal</span></header>
+      <div class="inner">
+        <dl class="rec">
+          <dt>Why</dt><dd>After deploy, the operator SSHs into the Spark and asks Cursor or Claude to generate. The agent patches a <strong>locked</strong> workflow and <code>POST</code>s it to ComfyUI on 8188. Weights stay resident. The browser UI is optional.</dd>
+          <dt>Accepted limit</dt><dd><strong>One GPU job at a time.</strong> This is a local box. A second <code>POST /prompt</code> waits in ComfyUI’s queue. That is the product, not a defect.</dd>
+          <dt>Rejected</dt><dd>Starting a new ComfyUI per video. Inventing a new DAG for a normal generate. Treating vLLM-Omni or a public HTTP API as the first product.</dd>
+          <dt>Reverses if</dt><dd>The product becomes a multi-user service. Then revisit D-01. The generation pipeline inside one job does not change.</dd>
+          <dt>Full contract</dt><dd><a href="design/operator.html">Operator page</a> · working notes in <code>design/operator.md</code>.</dd>
         </dl>
       </div>
     </div>

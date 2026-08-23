@@ -6,9 +6,9 @@ The public briefing has the full argument and measurements: https://xiaohuichen-
 
 ## Pipeline
 
-1. **Condition** — Qwen3-VL-32B reads text and optional references once. The LM head is unused; H3 takes the unnormalized hidden state after layer 50.
-2. **Encode** — a video VAE (16× spatial, 4× temporal) and an audio VAE (32 kHz → 40 Hz latents) map media into compact spaces.
-3. **Pack** — text, references, video noise, and audio noise become one multimodal token sequence with RoPE.
+1. **Condition** — Qwen3-VL-32B reads the text prompt once (LM head unused; H3 takes the unnormalized hidden state after layer 50). On the FL2VA node, optional first/last-frame **images** are also tokenized into that prompt.
+2. **Encode** — the video VAE (16× spatial, 4× temporal) encodes those same keyframe images into frozen cond latents, and later decodes the generated video. The audio VAE maps 32 kHz stereo ↔ 40 Hz latents. The VAE does not *create* keyframes.
+3. **Pack** — text tokens, optional keyframe latents, video noise, and audio noise become one multimodal token sequence with RoPE. Ref2VA reference blocks (`<Picture N>` / `<Video N>`) are a different partition and are not the first product.
 4. **Denoise** — 50 DiT blocks rewrite video and audio latents under two flow-matching schedules (`shift` 12/3 without Turbo, 6/3 with Turbo). The released weights are CFG-distilled: no `guidance_scale`, no negative prompt.
 5. **Decode** — the two VAEs emit pixels and stereo audio.
 

@@ -2,7 +2,7 @@
 
 A DGX Spark (GB10) project for running [MiniMax H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) — a 33B joint video-and-audio diffusion transformer — through **ComfyUI**, then packaging that stack so other Spark users can run the same recipe.
 
-The long-term deliverable is a documented, Spark-specific **Docker image** plus the ComfyUI workflows and scripts needed to generate 1080p clips with native stereo audio. This repository is being built in phases. Research is published. Design is starting. Host and container deployment are not started.
+The product end goal: SSH into a Spark, ask Cursor or Claude to run a **locked ComfyUI workflow**, and get an mp4. One GPU job at a time is accepted. The Docker image exists so other Spark users get the same server, workflows, and submit path. Research is published. The operator contract is adopted. Host and container deployment are not started.
 
 This repository does **not** host model weights.
 
@@ -18,7 +18,8 @@ This repository does **not** host model weights.
 
 Site hub: **https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/**  
 Research briefing: **https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/briefing.html**  
-Design HTML pages are skeletons until decisions are locked. Working notes are in [`design/`](design/).
+Operator contract (adopted): [design/operator.md](design/operator.md) · [HTML](https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/design/operator.html)  
+Other design HTML pages are still skeletons. Working notes are in [`design/`](design/).
 
 ## Who this is for
 
@@ -30,11 +31,11 @@ If you only want the findings, read the [briefing](https://xiaohuichen-personal.
 ## Repository layout
 
 ```text
-docs/         GitHub Pages site: hub, research briefing, design skeletons.
+docs/         GitHub Pages site: hub, research briefing, operator page, design skeletons.
 design/       Working markdown for decisions. Promote into docs/design/ when locked.
 deploy/       Future Dockerfile, compose file, and Spark runtime notes.
-workflows/    Future ComfyUI graph JSON used by the container and by host installs.
-scripts/      Future download, smoke-test, and health-check helpers.
+workflows/    Future locked ComfyUI graphs the agent submits (not invented per request).
+scripts/      Future download, submit/poll, smoke-test, and health-check helpers.
 ```
 
 | Path | What belongs there | What does not |
@@ -57,7 +58,7 @@ design/*.md  ──when locked──►  docs/design/*.html
 
 1. **Design first.** Open questions that change the image (base, weight mount, ComfyUI pin, Turbo LoRA in or out) are listed in [`design/`](design/). Do not start the Dockerfile until those are explicit.
 2. **Host ComfyUI next.** Prove one 5.17 s clip on this Spark with the D-02 weights and D-05 canvas before wrapping anything.
-3. **Container last.** The image should reproduce that host recipe: same kernels, same workflow, weights supplied at runtime, UI on port 8188.
+3. **Container last.** The image should reproduce that host recipe so an agent on another Spark can `POST /prompt` the same way. UI on 8188 is optional; the API is the product.
 
 vLLM-Omni is a later serving option, not the first deploy path. See [D-01](design/decisions.md#d-01-comfyui-first).
 
@@ -74,6 +75,7 @@ Full rationale and reversal conditions live in [`design/decisions.md`](design/de
 | D-05 | Generate at 960×544, then 2× SPAN to 1080p | Provisional |
 | D-06 | 8 steps for dialogue; 4 steps only for silent seed-hunting | Provisional |
 | D-07 | Default clip length 8.00 s; first smoke test 5.17 s | Adopted |
+| D-08 | SSH + agent → locked workflow → long-lived ComfyUI; one GPU job at a time | Adopted |
 
 ## License gate
 

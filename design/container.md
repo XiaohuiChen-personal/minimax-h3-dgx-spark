@@ -9,8 +9,10 @@ One aarch64 image that reproduces the host recipe:
 - ComfyUI new enough to include `ModelSamplingAV` (after 2026-08-06)
 - D-02 checkpoints loaded from a **host or volume mount**, not from the image layers
 - D-05 / D-07 workflow from [`../workflows/`](../workflows/) (not written yet)
-- UI reachable on **8188**
-- Optional later: a thin HTTP shim in front of ComfyUI, or a second image for vLLM-Omni
+- API on **8188** so an SSH’d agent can `POST /prompt` (see [`operator.md`](operator.md))
+- Browser UI on the same port is optional
+- One GPU job at a time; ComfyUI’s queue is enough
+- Optional later: a second image for vLLM-Omni (not the first product)
 
 The image exists so a second Spark does not have to rediscover wheels, launch flags, and graph wiring.
 
@@ -36,7 +38,7 @@ docker run --gpus all \
 |---|---|
 | `/models` | DiT, text encoder, VAEs, optional Turbo LoRA, SPAN weights |
 | `/output` | Generated mp4 / audio |
-| `/data` (optional) | Reference images for i2va / fl2va / ref2va |
+| `/data` (optional) | First/last-frame images for the FL2VA node (not “generated” by the VAE) |
 
 Exact host paths, compose file names, and NGC vs local build are still open.
 
@@ -46,8 +48,8 @@ Exact host paths, compose file names, and NGC vs local build are still open.
 2. **Weight acquisition.** Documented `huggingface-cli` download into the mount vs a helper in [`../scripts/`](../scripts/). Never a silent download into the image.
 3. **ComfyUI pin.** Commit or release newer than `bdcb886a`, recorded here and in the image labels.
 4. **Default workflow.** One FL2VA graph at 960×544 / 8.00 s / 8 steps, plus a 5.17 s smoke-test graph. Turbo 4-step is not the default.
-5. **Acceleration set.** First image: stock attention. Later tag or build-arg for SageAttention 2.2.0 once it is runtime-tested on this GB10.
-6. **Network API.** ComfyUI UI only for the first image. FastAPI shim and vLLM-Omni are separate decisions (see D-01).
+5. **Acceleration set.** SageAttention 2.2.0 imports and runs on this GB10 (kernel-level). Still untested inside a full H3 graph. First image may ship stock attention; a later tag or build-arg adds Sage 2.2 + Sol-Attn `triton_ref`.
+6. **Network API.** ComfyUI’s own `POST /prompt` is the product (D-08). Browser UI is optional. A FastAPI shim and vLLM-Omni are later, only if this becomes multi-user.
 7. **License acknowledgement.** The entrypoint should refuse to start unless the operator has confirmed the H3 Community License / excluded-territory status. Mechanism TBD (env flag vs mounted notice).
 
 ## What the first image is not

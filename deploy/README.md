@@ -14,4 +14,6 @@ deploy/
   README.md          # this file: how to run on a DGX Spark
 ```
 
-Until those exist, do not copy third-party ComfyUI images into this tree. The container must follow the design contract, not the other way around.
+The image exists so an SSH’d agent on another Spark can `POST /prompt` the same locked workflows (D-08). One GPU job at a time is accepted. See [`../design/operator.md`](../design/operator.md).
+
+Until those files exist, do not copy third-party ComfyUI images into this tree. The container must follow the design contract, not the other way around.

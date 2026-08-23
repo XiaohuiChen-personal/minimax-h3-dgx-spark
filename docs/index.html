@@ -17,6 +17,7 @@
     <a class="brand" href="index.html">H3 on Spark</a>
     <div class="nav-links">
       <a href="briefing.html">Research</a>
+      <a href="design/operator.html">Operator</a>
       <a href="design/architecture.html">Architecture</a>
       <a href="design/decisions.html">Decisions</a>
       <a href="design/container.html">Container</a>
@@ -31,8 +32,8 @@
     </div>
     <h1>MiniMax H3 on DGX&nbsp;Spark</h1>
     <p class="standfirst">
-      Research, design, and later a ComfyUI container so other Spark users can generate
-      1080p video with native stereo audio without re-deriving the recipe.
+      Research, design, and later a ComfyUI container. The end goal is: SSH into a Spark,
+      ask an agent to run a locked workflow, get an mp4. One GPU job at a time.
     </p>
     <div class="legend">
       <div><span class="chip c-m">Research</span> published</div>
@@ -46,8 +47,14 @@
 
 <section>
   <div class="shead"><span class="snum">01</span><h2>Read first</h2></div>
-  <p class="sdek">The briefing is the published evidence. Design pages are skeletons until those decisions are locked.</p>
+  <p class="sdek">The briefing is the evidence. The operator page is the product end goal. Other design pages stay skeletons until those items lock.</p>
   <div class="index-grid">
+    <a class="index-card span2" href="design/operator.html">
+      <span class="chip c-m">End goal · D-08</span>
+      <h2>Operator model</h2>
+      <p>SSH in, ask Cursor or Claude, submit a locked ComfyUI workflow. One GPU job at a time is accepted. The DAG is predefined; the agent only fills prompt, seed, and filename.</p>
+      <span class="go">Open the operator contract →</span>
+    </a>
     <a class="index-card span2" href="briefing.html">
       <span class="chip c-m">Research</span>
       <h2>Research briefing</h2>
@@ -63,7 +70,7 @@
     <a class="index-card" href="design/decisions.html">
       <span class="chip c-s">Design · skeleton</span>
       <h2>Standing decisions</h2>
-      <p>Reserved for D-01…D-07 once each item is verified on this box. Working notes stay in <code>design/</code>.</p>
+      <p>Reserved for D-01…D-08 once each item is filled in on the public page. D-08 (operator model) is already adopted. Working notes stay in <code>design/</code>.</p>
       <span class="go">Open skeleton →</span>
     </a>
     <a class="index-card span2" href="design/container.html">
@@ -85,7 +92,7 @@
         <span class="n">02</span><strong>Host ComfyUI</strong><span class="chip c-s">Next</span>
         <span></span><span>One 5.17 s clip at 960×544 with audio on this Spark.</span><span></span>
         <span class="n">03</span><strong>Container</strong><span class="chip c-s">Later</span>
-        <span></span><span>Package the proven host recipe. Weights stay on a volume, UI on 8188.</span><span></span>
+        <span></span><span>Package the proven host recipe. Weights on a volume, API on 8188, one job at a time.</span><span></span>
       </div>
     </div>
     <div class="box compute">

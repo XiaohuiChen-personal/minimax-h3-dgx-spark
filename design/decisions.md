@@ -18,7 +18,9 @@ ComfyUI is the smaller download (~40 GiB selected weights vs ~105 GiB resident o
 
 **Correction:** FL2VA on one Spark *does* serve text-to-video. `--task-type fl2va` handles `t2va` and keyframe-conditioned `fl2va`. Ref2VA needs the other DiT and a restart.
 
-**Reverses if** serving a stable API matters more than learning and iterating on kernels, LoRAs, and graphs.
+The first product still uses ComfyUI’s HTTP API (`POST /prompt`) from an SSH’d agent. That is D-08, not a switch to vLLM-Omni.
+
+**Reverses if** multi-user or internet serving matters more than learning and iterating on kernels, LoRAs, and graphs. Then vLLM-Omni, or ComfyUI behind a queue shim.
 
 ## D-02 · FP8 DiT, INT8 text encoder
 
@@ -82,11 +84,23 @@ Duration alone has not been isolated as the cause of unusable audio. See D-07.
 
 **Reverses if** a same-seed, same-step, same-resolution A/B on this box shows 8.00 s audio clearly worse than 5.17 s.
 
+## D-08 · SSH + agent against a long-lived ComfyUI
+
+**Status:** adopted — this is the product end goal
+
+After deploy, the operator SSHs into the Spark and asks Cursor or Claude to generate. The agent patches a locked workflow and `POST`s it to ComfyUI on port 8188. ComfyUI stays up; weights stay resident. **One GPU job at a time is accepted** for this local box. A second request queues.
+
+The browser UI is optional. vLLM-Omni / a public HTTP API is not the first product.
+
+Full process and limits: [`operator.md`](operator.md).
+
+**Reverses if** the product becomes a multi-user service. Then revisit D-01 (vLLM-Omni or a queue shim). The generation pipeline inside one job does not change.
+
 ## Still open (do not pretend these are settled)
 
 - Whether ComfyUI H3 actually uses `_scaled_mm` on this path.
 - Pruned vs unpruned visual and audio quality.
-- SageAttention 2.2.0 wheel is built for `sm_121a` but not runtime-tested; 1.0.6 was measured at 1.09–1.14× vs SDPA.
+- SageAttention 2.2.0 now imports and runs on this GB10 (S=25120, cos 1.000 vs SDPA, 1.62×). Still untested inside a full H3 ComfyUI graph.
 - Container base image, weight-mount layout, and ComfyUI version pin — [`container.md`](container.md).
 - Whether the default image includes a Turbo LoRA or only the 8-step recipe's LoRA files.
 - Whether anyone else gets a ComfyUI UI only, or also a small HTTP shim.

@@ -6,7 +6,8 @@ Published URL: https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/
 |---|---|
 | `index.html` | Site hub |
 | `briefing.html` | Research briefing (complete) |
-| `design/*.html` | Design skeletons — fill in when decisions lock |
+| `design/operator.html` | Product end goal (D-08, adopted) |
+| `design/*.html` | Other design pages — skeletons until those items lock |
 | `assets/site.css` | Shared styles |
 | `.nojekyll` | Stops Jekyll from rewriting pages |
 

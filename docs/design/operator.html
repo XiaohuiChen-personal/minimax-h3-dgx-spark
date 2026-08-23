@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Product end goal: SSH plus an AI agent submits a locked ComfyUI workflow. One GPU job at a time.">
+<title>Operator — MiniMax H3 on DGX Spark</title>
+<link rel="stylesheet" href="../assets/site.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+</head>
+<body>
+
+<nav class="site-nav" aria-label="Site">
+  <div class="nav-inner">
+    <a class="brand" href="../index.html">H3 on Spark</a>
+    <div class="nav-links">
+      <a href="../briefing.html">Research</a>
+      <a href="operator.html" class="active">Operator</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="decisions.html">Decisions</a>
+      <a href="container.html">Container</a>
+    </div>
+  </div>
+</nav>
+
+<header class="top">
+  <div class="wrap">
+    <div class="eyebrow">
+      <span>Design</span><span>D-08 · adopted</span><span>Product end goal</span>
+    </div>
+    <h1>SSH in, ask the agent, get an mp4</h1>
+    <p class="standfirst">
+      After deploy, Cursor or Claude on this Spark submits a <b>predefined workflow</b> to a
+      <b>long-lived</b> ComfyUI. One GPU job at a time is the accepted local limit.
+    </p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section>
+  <div class="shead"><span class="snum">01</span><h2>The product</h2></div>
+  <p class="sdek">Not vLLM chat. Not a new engine per request. One server, queued jobs, locked DAGs.</p>
+  <figure class="fig-plain">
+    <svg viewBox="0 0 980 200" role="img" aria-label="SSH to agent to ComfyUI API to mp4.">
+      <rect x="20" y="50" width="170" height="90" rx="8" class="dbox-cold"/>
+      <text x="105" y="88" text-anchor="middle" class="dhead">SSH / Cursor</text>
+      <text x="105" y="110" text-anchor="middle" class="dlabel-s">prompt + seed</text>
+      <rect x="230" y="50" width="190" height="90" rx="8" class="dbox-cold"/>
+      <text x="325" y="88" text-anchor="middle" class="dhead">Agent</text>
+      <text x="325" y="110" text-anchor="middle" class="dlabel-s">patch workflow JSON</text>
+      <rect x="460" y="36" width="280" height="118" rx="8" class="dbox-hot"/>
+      <text x="600" y="78" text-anchor="middle" class="dhead">ComfyUI :8188</text>
+      <text x="600" y="100" text-anchor="middle" class="dlabel">POST /prompt</text>
+      <text x="600" y="118" text-anchor="middle" class="dlabel-s">weights already resident</text>
+      <rect x="780" y="50" width="180" height="90" rx="8" class="dbox-cold"/>
+      <text x="870" y="88" text-anchor="middle" class="dhead">output/*.mp4</text>
+      <text x="870" y="110" text-anchor="middle" class="dlabel-s">24 fps + 32 kHz</text>
+      <line x1="190" y1="95" x2="230" y2="95" class="dline"/>
+      <line x1="420" y1="95" x2="460" y2="95" class="dline-hot"/>
+      <line x1="740" y1="95" x2="780" y2="95" class="dline"/>
+    </svg>
+    <figcaption>The browser UI is optional. Agents use the HTTP API. A second submit queues behind the first.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">02</span><h2>Operator steps</h2></div>
+  <p class="sdek">ComfyUI is already up. The agent only fills free fields and waits.</p>
+  <ol>
+    <li><strong>Leave ComfyUI running.</strong> Start it once. Do not restart per video.</li>
+    <li><strong>SSH into the Spark</strong> and open Cursor or Claude on that machine.</li>
+    <li><strong>Ask for a generate</strong> against the default 8.00 s or smoke-test 5.17 s workflow.</li>
+    <li><strong>The agent changes only free fields</strong> (prompt, seed, filename, optional first/last-frame image files) and <code>POST</code>s to <code>/prompt</code>.</li>
+    <li><strong>It polls <code>/history/&lt;prompt_id&gt;</code></strong> for minutes, then returns the path under <code>output/</code>.</li>
+  </ol>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">03</span><h2>What one generation does</h2></div>
+  <p class="sdek">The JSON is assembly. The denoising loop lives inside one sampler node.</p>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>When</th><th>Step</th></tr></thead>
+      <tbody>
+        <tr><td class="k">Once</td><td>Load DiT, Qwen3-VL, VAEs, LoRA, SPAN if not already resident</td></tr>
+        <tr><td class="k">Once</td><td>Qwen3-VL encodes the prompt; optional first/last frames go to Qwen <em>and</em> the video VAE</td></tr>
+        <tr><td class="k">Once</td><td>Allocate empty video + audio latents at 960×544</td></tr>
+        <tr><td class="k">× 8</td><td>Pack text + optional keyframe latents + noise; denoise both streams</td></tr>
+        <tr><td class="k">After</td><td>Decode both VAEs, SPAN 2×, mux mp4</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">04</span><h2>Fixed vs free</h2></div>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Locked in the workflow</th><th>Agent may change</th></tr></thead>
+      <tbody>
+        <tr><td>D-02 checkpoints</td><td>Text prompt</td></tr>
+        <tr><td>960×544, 8 steps, SPAN 2×</td><td>Seed</td></tr>
+        <tr><td>5.17 s smoke or 8.00 s default</td><td>Output filename</td></tr>
+        <tr><td>Sampler, shifts, Sage 2.2, Sol-Attn triton_ref, FBC H3 Safe</td><td>Optional first/last-frame image files</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:14px">Ask for “10 seconds” and snap to <strong>10.13 s</strong> or refuse. Do not invent a new DAG for a normal generate.</p>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">05</span><h2>Keyframes — attach pictures, same graph</h2></div>
+  <p class="sdek">Default is text-only. The VAE does not create keyframes. The agent attaches files; the locked node encodes them.</p>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>What the agent does</th><th>What the node does</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Wire <code>first_frame</code> / <code>last_frame</code> image files</td><td><code>clip.tokenize(prompt, images=…)</code></td><td>Qwen3-VL sees the pictures (semantics)</td></tr>
+        <tr><td>Same files, same node</td><td><code>vae.encode</code> → frozen <code>minimax_keyframes</code></td><td>Pixel lock: frame 1 / last frame <em>is</em> that image</td></tr>
+        <tr><td>Write <code>&lt;Picture 1&gt;</code> in the prompt only</td><td>Nothing useful on this graph</td><td>Empty theater — those tags are Ref2VA / hosted rewriter</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:14px">Attaching pictures to the prompt does <strong>not</strong> replace the VAE path. Prompt-only images are semantic. VAE keyframe latents are what make the opening or closing frame match. Do not switch to Ref2VA for a normal generate.</p>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">06</span><h2>Limits — accepted</h2></div>
+  <div class="box compute">
+    <div class="boxlabel">One GPU job at a time</div>
+    <p>This is a local box. A second <code>POST /prompt</code> waits in ComfyUI’s queue. That is the product, not a defect.</p>
+  </div>
+  <ul style="margin-top:16px">
+    <li><strong>Warm start.</strong> Do not start or restart ComfyUI per video.</li>
+    <li><strong>Wall-clock.</strong> A warm 8.00 s job is minutes. Agents must poll or background-wait.</li>
+    <li><strong>No multi-user serving.</strong> SSH-local only. vLLM-Omni is a later D-01 option.</li>
+    <li><strong>License.</strong> Confirm the H3 Community License before any generate. Outputs are restricted in excluded territories.</li>
+  </ul>
+</section>
+
+<section>
+  <div class="shead"><span class="snum">07</span><h2>What the agent must not do</h2></div>
+  <p class="sdek">A normal generate is a parameter patch, not a new install or a new graph.</p>
+  <ul>
+    <li>Download weights or embed tokens in the graph</li>
+    <li>Enable EasyCache, SageAttention 3, a blind <code>--use-sage-attention</code> flag, Sol-Attn <code>flex_attention</code>, Turbo-SLA on top of Sol-Attn, or <code>--lowvram</code></li>
+    <li>Change canvas, steps, or length except to another legal pair (5.17 / 8.00 / 10.13 / 15.08 s)</li>
+    <li>Start or restart ComfyUI for a normal generate</li>
+    <li>Treat <code>&lt;Picture N&gt;</code> prompt tags as a substitute for wiring first/last-frame image inputs</li>
+    <li>Run a separate VAE pass or another image model just to “make keyframes”</li>
+    <li>Switch the graph to Ref2VA for a normal first/last-frame generate</li>
+  </ul>
+</section>
+
+<p class="foot">Working source: <code>design/operator.md</code>. ComfyUI, the locked workflow JSON, and the submit/poll script are not built yet. Until they exist, this page is the contract, not a runnable path.</p>
+
+</div>
+</body>
+</html>
