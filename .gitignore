@@ -23,7 +23,9 @@ ComfyUI/
 venv/
 __pycache__/
 .DS_Store
-.cursor/
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
 *.swp
 
 # Local container / build leftovers

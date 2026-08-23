@@ -39,6 +39,8 @@ scripts/      Future download, submit/poll, and smoke-test helpers.
 
 Weights, outputs, and caches stay on the machine. They are gitignored.
 
+Agent rules (single copy for Cursor, Claude Code, and Codex): [`AGENTS.md`](AGENTS.md). `CLAUDE.md` and `.cursor/rules/agents.mdc` only point at that file.
+
 ## How an implementing agent should work
 
 ```text

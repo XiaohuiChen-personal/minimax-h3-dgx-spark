@@ -1,0 +1,12 @@
+---
+description: Project agent rules. Source of truth is AGENTS.md — read that file; do not duplicate it.
+alwaysApply: true
+---
+
+# Agent rules (pointer)
+
+Read and follow `AGENTS.md` at the repository root before any research, design, implementation, or generate.
+
+That file is the only copy of the project rules. Codex reads it directly. Claude Code loads it via `CLAUDE.md`. This Cursor rule exists so the same contract is always applied.
+
+Do not add project rules here. Edit `AGENTS.md` instead.
