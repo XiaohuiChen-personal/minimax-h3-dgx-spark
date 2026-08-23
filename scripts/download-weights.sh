@@ -82,11 +82,16 @@ PY
 }
 
 expected_span_bytes() {
-  curl -sI "$SPAN_URL" | python3 - <<'PY'
+  # Do not use `python3 - <<'PY'` on a pipe: `python3 -` reads the
+  # program from stdin, so the heredoc eats the headers and
+  # Content-Length is always missing (dest-present SPAN never skips).
+  local headers
+  headers="$(curl -sI "$SPAN_URL")"
+  python3 - "$headers" <<'PY'
 import sys
 
 length = None
-for raw in sys.stdin:
+for raw in sys.argv[1].splitlines():
     line = raw.replace("\r", "")
     if line.lower().startswith("content-length:"):
         length = int(line.split(":", 1)[1].strip())
