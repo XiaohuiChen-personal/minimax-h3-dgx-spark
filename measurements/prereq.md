@@ -280,3 +280,9 @@ Pinned from `git ls-remote https://github.com/comfyanonymous/ComfyUI.git HEAD`, 
 | HEAD date | 2026-08-23 (`Increase minimum pyav version. (#15827)`) |
 
 Do **not** float on `master` in the image. Clone that SHA.
+
+---
+
+## Task 7 notes
+
+Locked graphs call `PathchSageAttentionKJ` (`sage_attention=sageattn_qk_int8_pv_fp16_triton`). Task 9 must clone `kijai/ComfyUI-KJNodes`. Do not install SageAttention 3 (`sageattn3` is a separate combo and is not selected).

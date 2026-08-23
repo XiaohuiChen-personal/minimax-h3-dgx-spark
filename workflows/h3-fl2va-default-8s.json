@@ -69,21 +69,25 @@
   "7": {
     "class_type": "PathchSageAttentionKJ",
     "_meta": {
-      "title": "SageAttention 2.2 model patch"
+      "title": "SageAttention 2.2 model patch",
+      "task9_clone": "ComfyUI-KJNodes",
+      "note": "Task 9 must clone kijai/ComfyUI-KJNodes. Locked combo is Sage 2.x sageattn_qk_int8_pv_fp16_triton, not sageattn3. Do not use --use-sage-attention."
     },
     "inputs": {
       "model": [
         "6",
         0
       ],
-      "sage_attention": "auto",
+      "sage_attention": "sageattn_qk_int8_pv_fp16_triton",
       "allow_compile": false
     }
   },
   "8": {
     "class_type": "MiniMaxH3MemoryEfficientSolAttentionPatch",
     "_meta": {
-      "title": "Sol-Attn kernel triton_ref"
+      "title": "Sol-Attn kernel triton_ref",
+      "pack": "Saganaki22/ComfyUI-sol-attn",
+      "note": "triton-ref pack (class has no kernel combo). Task 9 must clone Saganaki22/ComfyUI-sol-attn, not the KingGore fork."
     },
     "inputs": {
       "model": [
@@ -98,8 +102,7 @@
       "int8_qk": false,
       "int8_pv": false,
       "sink_conditioning": "exact_kv",
-      "dense_blocks": "",
-      "kernel": "triton_ref"
+      "dense_blocks": ""
     }
   },
   "9": {
@@ -124,7 +127,7 @@
     "class_type": "MiniMaxH3ImageToVideo",
     "_meta": {
       "title": "FL2VA condition + AV latent",
-      "keyframe_convention": "first_frame/last_frame are empty filename scalars the submit helper can patch. Default text-only leaves them empty (optional IMAGE unused). Do not wire LoadImage; empty LoadImage fails. Do not use Ref2VA or prompt-only picture tags."
+      "keyframe_convention": "T2V default omits first_frame/last_frame so unused optional IMAGE is Python None. Do not add empty-string or JSON null keys. Real FL2VA needs LoadImage IMAGE links (Task 4 leftover). Do not use Ref2VA."
     },
     "inputs": {
       "clip": [
@@ -138,9 +141,7 @@
       "prompt": "A person facing the camera and speaking clearly. Natural room light. Stereo room tone and intelligible speech.",
       "width": 960,
       "height": 544,
-      "length": 192,
-      "first_frame": "",
-      "last_frame": ""
+      "length": 192
     }
   },
   "11": {
