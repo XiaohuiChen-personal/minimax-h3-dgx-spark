@@ -215,13 +215,27 @@ def main(argv: list[str] | None = None) -> int:
     _patch_existing_scalars(graph, SEED_KEYS, args.seed)
     _patch_existing_scalars(graph, NAME_KEYS, args.name)
     if args.first_frame:
-        _patch_existing_scalars(
+        patched = _patch_existing_scalars(
             graph, FIRST_FRAME_KEYS, rewrite_keyframe_path(args.first_frame)
         )
+        if patched == 0:
+            print(
+                "error: --first-frame set but the graph has no scalar "
+                "first_frame input to patch (missing or linked)",
+                file=sys.stderr,
+            )
+            return 1
     if args.last_frame:
-        _patch_existing_scalars(
+        patched = _patch_existing_scalars(
             graph, LAST_FRAME_KEYS, rewrite_keyframe_path(args.last_frame)
         )
+        if patched == 0:
+            print(
+                "error: --last-frame set but the graph has no scalar "
+                "last_frame input to patch (missing or linked)",
+                file=sys.stderr,
+            )
+            return 1
 
     status, raw, parsed = http_json("POST", f"{base}/prompt", {"prompt": graph})
     if status != 200 or not isinstance(parsed, dict):

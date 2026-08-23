@@ -23,7 +23,11 @@ SUCCESS_HISTORY = {
         "outputs": {
             "9": {
                 "videos": [
-                    {"filename": "tiny.mp4", "subfolder": "", "type": "output"}
+                    {
+                        "filename": "history-name.mp4",
+                        "subfolder": "clips",
+                        "type": "output",
+                    }
                 ]
             }
         },
@@ -140,9 +144,10 @@ def test_submit_prompt_prints_host_output_from_history(tmp_path, mock_comfy):
 
     assert result.returncode == 0, result.stderr + result.stdout
     assert "OUTPUT" in result.stdout
-    expected = str((output_root.resolve() / "tiny.mp4"))
+    expected = str(output_root.resolve() / "clips" / "history-name.mp4")
     stdout = result.stdout.strip()
-    assert stdout.endswith("tiny.mp4")
+    assert stdout == f"OUTPUT {expected}"
+    assert stdout.endswith("history-name.mp4")
     assert expected in result.stdout
 
     assert mock_comfy.posted, "expected POST /prompt"
@@ -155,6 +160,7 @@ def test_submit_prompt_prints_host_output_from_history(tmp_path, mock_comfy):
     assert "hello" in _input_values(graph, "prompt") + _input_values(graph, "text")
     assert 7 in _input_values(graph, "seed")
     assert 960 in _input_values(graph, "width")
+    assert _input_values(graph, "filename_prefix") == ["unit"]
     assert mock_comfy.history_gets >= 2
 
 
@@ -193,11 +199,50 @@ def test_rewrites_keyframe_host_paths_to_data(tmp_path, mock_comfy):
     assert _input_values(graph, "first_frame") == ["/data/first.png"]
     assert _input_values(graph, "last_frame") == ["/data/shots/last.png"]
 
-    host_out = str((output_root.resolve() / "tiny.mp4"))
+    host_out = str(output_root.resolve() / "clips" / "history-name.mp4")
     assert "OUTPUT" in result.stdout
     assert host_out in result.stdout
-    assert result.stdout.strip().endswith("tiny.mp4")
+    assert result.stdout.strip().endswith("history-name.mp4")
     assert "/opt/ComfyUI/output" not in result.stdout
+
+
+def test_first_frame_flag_fails_when_graph_has_no_first_frame(tmp_path, mock_comfy):
+    data = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    data["1"]["inputs"].pop("first_frame", None)
+    workflow = tmp_path / "no-first-frame.json"
+    workflow.write_text(json.dumps(data), encoding="utf-8")
+
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    first = tmp_path / "face.png"
+    first.write_bytes(b"x")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(workflow),
+            "--prompt",
+            "hello",
+            "--seed",
+            "7",
+            "--name",
+            "unit",
+            "--first-frame",
+            str(first),
+            "--base-url",
+            f"http://127.0.0.1:{mock_comfy.server_address[1]}",
+            "--output-root",
+            str(output_root),
+        ],
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "OUTPUT" not in result.stdout
+    assert mock_comfy.posted == []
 
 
 def test_history_error_prints_body_and_exits(tmp_path, mock_comfy):
