@@ -18,7 +18,7 @@ The browser UI on 8188 is optional. The product is `POST /prompt`.
 
 ```text
 Spark host
-  ~/h3-weights   ──ro──►  /opt/ComfyUI/models
+  ~/h3-weights/<subdir>  ──ro──►  /opt/ComfyUI/models/<subdir>
   ~/h3-output    ──rw──►  /opt/ComfyUI/output
   ~/h3-data      ──ro──►  /data          (optional first/last-frame pictures)
 
@@ -112,13 +112,17 @@ services:
     ports:
       - "8188:8188"
     volumes:
-      - ${H3_WEIGHTS:-${HOME}/h3-weights}:/opt/ComfyUI/models:ro
+      - ${H3_WEIGHTS:-${HOME}/h3-weights}/diffusion_models:/opt/ComfyUI/models/diffusion_models:ro
+      - ${H3_WEIGHTS:-${HOME}/h3-weights}/text_encoders:/opt/ComfyUI/models/text_encoders:ro
+      - ${H3_WEIGHTS:-${HOME}/h3-weights}/vae:/opt/ComfyUI/models/vae:ro
+      - ${H3_WEIGHTS:-${HOME}/h3-weights}/loras:/opt/ComfyUI/models/loras:ro
+      - ${H3_WEIGHTS:-${HOME}/h3-weights}/upscale_models:/opt/ComfyUI/models/upscale_models:ro
       - ${H3_OUTPUT:-${HOME}/h3-output}:/opt/ComfyUI/output
       - ${H3_DATA:-${HOME}/h3-data}:/data:ro
     restart: unless-stopped
 ```
 
-If mounting the **whole** `models` directory hides ComfyUI’s stock extra files, prefer mounting **only** the subfolders listed in the host tree (`diffusion_models`, `text_encoders`, `vae`, `loras`, `upscale_models`). Pick one scheme at implement time and document it in `deploy/README.md`. Do not mix both.
+Mount **subfolders only**. A whole-tree mount of `~/h3-weights` onto `/opt/ComfyUI/models` hides ComfyUI’s stock extras. Do not mix both schemes. If nested `${HOME}` expansion fails, write `deploy/.env` with absolute `H3_WEIGHTS`.
 
 One service. One GPU. No scale-out.
 
@@ -208,7 +212,11 @@ Stopping unloads the ~40 GiB of weights. The next start pays that cost again.
 ```bash
 docker run --gpus all --name h3-comfy \
   -p 8188:8188 \
-  -v "$HOME/h3-weights:/opt/ComfyUI/models:ro" \
+  -v "$HOME/h3-weights/diffusion_models:/opt/ComfyUI/models/diffusion_models:ro" \
+  -v "$HOME/h3-weights/text_encoders:/opt/ComfyUI/models/text_encoders:ro" \
+  -v "$HOME/h3-weights/vae:/opt/ComfyUI/models/vae:ro" \
+  -v "$HOME/h3-weights/loras:/opt/ComfyUI/models/loras:ro" \
+  -v "$HOME/h3-weights/upscale_models:/opt/ComfyUI/models/upscale_models:ro" \
   -v "$HOME/h3-output:/opt/ComfyUI/output" \
   -v "$HOME/h3-data:/data:ro" \
   h3-spark:local
@@ -220,7 +228,7 @@ Prefer Compose so the mounts stay consistent.
 
 In this order, in a later session:
 
-1. `scripts/download-weights.sh` — huggingface-cli or `huggingface_hub` into the host tree. No tokens in the file.
+1. `scripts/download-weights.sh` — `hf download` into the host tree (not `huggingface-cli`; that binary is not on this Spark). No tokens in the file. Never `--include "*.safetensors"` on Comfy-Org/MiniMax-H3 (that is the 471 G snapshot).
 2. `scripts/check-weights.sh` — exit 1 with a file list if anything required is missing.
 3. `workflows/h3-fl2va-smoke-5s17.json` and `workflows/h3-fl2va-default-8s.json` — see [`../workflows/README.md`](../workflows/README.md).
 4. `scripts/submit-prompt.sh` — patch free fields, `POST /prompt`, poll `/history`.
