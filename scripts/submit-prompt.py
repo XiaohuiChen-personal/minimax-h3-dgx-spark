@@ -4,7 +4,7 @@
 Patched node input names (scalars only; ComfyUI links like ["4", 0] are skipped):
 
   text, prompt         <- --prompt
-  seed                 <- --seed
+  seed, noise_seed     <- --seed  (KSampler.seed or RandomNoise.noise_seed)
   filename_prefix      <- --name
   first_frame          <- --first-frame
   last_frame           <- --last-frame
@@ -29,14 +29,16 @@ from typing import Any, Iterable
 
 # Free fields only. Canvas / frames / steps / checkpoint names stay locked.
 PROMPT_KEYS = ("text", "prompt")
-SEED_KEYS = ("seed",)
+SEED_KEYS = ("seed", "noise_seed")
 NAME_KEYS = ("filename_prefix",)
 FIRST_FRAME_KEYS = ("first_frame",)
 LAST_FRAME_KEYS = ("last_frame",)
 
 # Realistic ComfyUI history outputs are lists of {filename, subfolder, type}.
+# Official SaveVideo PreviewVideo uses images + animated, not a videos key.
 # Do not parse outputs[id]["filename"] as a string list.
 MEDIA_KEYS = ("videos", "gifs", "images")
+VIDEO_EXTS = (".mp4", ".webm", ".mkv", ".mov")
 
 POLL_INTERVAL_S = 2
 POLL_TIMEOUT_S = 3600
@@ -161,10 +163,20 @@ def _history_is_error(entry: dict[str, Any]) -> bool:
     return False
 
 
+def _is_output_media(item: dict[str, Any]) -> bool:
+    kind = item.get("type")
+    return kind in (None, "", "output")
+
+
+def _is_video_filename(filename: str) -> bool:
+    return os.path.splitext(filename)[1].lower() in VIDEO_EXTS
+
+
 def _first_media(entry: dict[str, Any]) -> dict[str, Any] | None:
     outputs = entry.get("outputs") or {}
     if not isinstance(outputs, dict):
         return None
+    fallback = None
     for kind in MEDIA_KEYS:
         for node_out in outputs.values():
             if not isinstance(node_out, dict):
@@ -173,9 +185,15 @@ def _first_media(entry: dict[str, Any]) -> dict[str, Any] | None:
             if not isinstance(items, list):
                 continue
             for item in items:
-                if isinstance(item, dict) and item.get("filename"):
+                if not (isinstance(item, dict) and item.get("filename")):
+                    continue
+                if not _is_output_media(item):
+                    continue
+                if _is_video_filename(str(item["filename"])):
                     return item
-    return None
+                if fallback is None:
+                    fallback = item
+    return fallback
 
 
 def host_output_path(output_root: str, item: dict[str, Any]) -> str:
@@ -212,7 +230,14 @@ def main(argv: list[str] | None = None) -> int:
     base = args.base_url.rstrip("/")
 
     _patch_existing_scalars(graph, PROMPT_KEYS, args.prompt)
-    _patch_existing_scalars(graph, SEED_KEYS, args.seed)
+    patched_seed = _patch_existing_scalars(graph, SEED_KEYS, args.seed)
+    if patched_seed == 0:
+        print(
+            "error: --seed set but the graph has no scalar "
+            "seed or noise_seed input to patch (missing or linked)",
+            file=sys.stderr,
+        )
+        return 1
     _patch_existing_scalars(graph, NAME_KEYS, args.name)
     if args.first_frame:
         patched = _patch_existing_scalars(

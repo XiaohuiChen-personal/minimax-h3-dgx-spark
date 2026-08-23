@@ -41,6 +41,7 @@ class MockComfyServer(HTTPServer):
         self.posted: list[object] = []
         self.history_gets = 0
         self.history_error = False
+        self.history_payload = SUCCESS_HISTORY
 
 
 class MockComfyHandler(BaseHTTPRequestHandler):
@@ -78,7 +79,7 @@ class MockComfyHandler(BaseHTTPRequestHandler):
             if self.server.history_gets == 1:
                 self._send_json(200, {})
             else:
-                self._send_json(200, SUCCESS_HISTORY)
+                self._send_json(200, self.server.history_payload)
             return
         self._send_json(404, {"error": "not found"})
 
@@ -253,3 +254,117 @@ def test_history_error_prints_body_and_exits(tmp_path, mock_comfy):
     combined = result.stdout + result.stderr
     assert "history failed" in combined
     assert "OUTPUT" not in result.stdout
+
+
+def test_patches_noise_seed_on_official_random_noise_graph(tmp_path, mock_comfy):
+    """Official H3 graphs seed via RandomNoise.noise_seed, not KSampler.seed."""
+    data = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    data["2"] = {"class_type": "RandomNoise", "inputs": {"noise_seed": 0}}
+    workflow = tmp_path / "noise-seed.json"
+    workflow.write_text(json.dumps(data), encoding="utf-8")
+
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(workflow),
+            "--prompt",
+            "hello",
+            "--seed",
+            "7",
+            "--name",
+            "unit",
+            "--base-url",
+            f"http://127.0.0.1:{mock_comfy.server_address[1]}",
+            "--output-root",
+            str(output_root),
+        ],
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert mock_comfy.posted
+    graph = mock_comfy.posted[0]["prompt"]
+    assert _input_values(graph, "noise_seed") == [7]
+    assert _input_values(graph, "seed") == []
+
+
+def test_seed_flag_fails_when_graph_has_no_seed(tmp_path, mock_comfy):
+    data = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    data["2"]["inputs"].pop("seed", None)
+    workflow = tmp_path / "no-seed.json"
+    workflow.write_text(json.dumps(data), encoding="utf-8")
+
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(workflow),
+            "--prompt",
+            "hello",
+            "--seed",
+            "7",
+            "--name",
+            "unit",
+            "--base-url",
+            f"http://127.0.0.1:{mock_comfy.server_address[1]}",
+            "--output-root",
+            str(output_root),
+        ],
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "OUTPUT" not in result.stdout
+    assert mock_comfy.posted == []
+
+
+def test_history_prefers_output_mp4_over_input_or_temp_images(tmp_path, mock_comfy):
+    """Official SaveVideo emits images+animated; LoadImage/Preview use the same key."""
+    mock_comfy.history_payload = {
+        "abc": {
+            "status": {"status_str": "success", "completed": True},
+            "outputs": {
+                "5": {
+                    "images": [
+                        {"filename": "first.png", "subfolder": "", "type": "input"}
+                    ]
+                },
+                "8": {
+                    "images": [
+                        {
+                            "filename": "ComfyUI_temp_abc_00001_.png",
+                            "subfolder": "",
+                            "type": "temp",
+                        }
+                    ]
+                },
+                "9": {
+                    "images": [
+                        {
+                            "filename": "unit_00001_.mp4",
+                            "subfolder": "video",
+                            "type": "output",
+                        }
+                    ],
+                    "animated": [True],
+                },
+            },
+        }
+    }
+    port = mock_comfy.server_address[1]
+    result, output_root, _workflow = _run_submit(tmp_path, port)
+    assert result.returncode == 0, result.stderr + result.stdout
+    expected = str(output_root.resolve() / "video" / "unit_00001_.mp4")
+    assert result.stdout.strip() == f"OUTPUT {expected}"
+    assert "first.png" not in result.stdout
+    assert "ComfyUI_temp" not in result.stdout
+    assert "/opt/ComfyUI/output" not in result.stdout
