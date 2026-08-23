@@ -1,0 +1,1381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Research briefing for deploying MiniMax H3 video-and-audio generation on NVIDIA DGX Spark.">
+<title>Research briefing — MiniMax H3 on DGX Spark</title>
+<link rel="stylesheet" href="assets/site.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+
+</head>
+<body>
+
+<nav class="site-nav" aria-label="Site">
+  <div class="nav-inner">
+    <a class="brand" href="index.html">H3 on Spark</a>
+    <div class="nav-links">
+      <a href="briefing.html" class="active">Research</a>
+      <a href="design/architecture.html">Architecture</a>
+      <a href="design/decisions.html">Decisions</a>
+      <a href="design/container.html">Container</a>
+    </div>
+  </div>
+</nav>
+
+<header class="top">
+  <div class="wrap">
+    <div class="eyebrow">
+      <span>Research briefing</span><span>Revision 2 · 2026-08-23</span><span>GB10 · sm_121 · aarch64</span>
+    </div>
+    <h1>MiniMax H3 on DGX&nbsp;Spark</h1>
+    <p class="standfirst">
+      A 33-billion-parameter video-and-audio diffusion transformer, on a box with
+      <b>100 TFLOP/s and 251 GB/s</b>. The interesting result: the slow memory everyone
+      warns about is <b>not</b> your bottleneck — and that changes which optimizations are worth installing.
+    </p>
+    <div class="legend">
+      <div><span class="chip c-m">Measured</span> on your machine, this session</div>
+      <div><span class="chip c-p">Published</span> someone else's reported result</div>
+      <div><span class="chip c-s">Spec</span> vendor claim, unverified</div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<section id="revision">
+  <div class="shead"><span class="snum">R2</span><h2>What changed after the original Claude artifact</h2></div>
+  <p class="sdek">This page is the original briefing plus the later research pass. The production default is now locked.</p>
+  <div class="stack col">
+    <div class="box verdict">
+      <div class="boxlabel">Production default</div>
+      <p><strong>Generate at <code>960×544</code> for 8.00 seconds (192 frames), 8 steps, then 2× SPAN to <code>1920×1088</code> and crop to 1080p.</strong>
+      Use <code>544×960</code> for 9:16. First smoke test stays at 5.17 s / 124 frames.</p>
+    </div>
+    <ul>
+      <li><strong>vLLM-Omni on one Spark does serve text-to-video</strong> through the FL2VA partition. Launching with <code>--task-type fl2va</code> handles both <code>t2va</code> and keyframe-conditioned <code>fl2va</code>. Only Ref2VA needs the other DiT and a restart.</li>
+      <li><strong>Legal durations are 4.46 / 5.17 / 8.00 / 10.13 / 15.08 s.</strong> The 10.83 s figure in the first draft was a typo.</li>
+      <li><strong>Longer clips do not, by themselves, destroy audio.</strong> 15.08 s is inside the trained range. Official 8.00 s and 10.13 s samples have clean 32 kHz stereo. Community 5.17 s vs 10.13 s pairs at 1280×768 kept the same −14 dB RMS with no NaNs, clipping, or long silences. The clustered “10–15 s audio is unusable” reports used Turbo LoRAs, changing seeds, and often a pre-2026-08-07 ComfyUI sampler bug.</li>
+      <li><strong>8.00 s is the latency/quality default</strong> because it is useful, cheaper than 15.08 s (~5.3 min vs ~8.2 min on the optimized path), and stays below the contested 10–15 s Turbo reports. Stitch two 8 s shots rather than making 15.08 s the default until you A/B audio on this box.</li>
+      <li><strong>SageAttention 1.0.6 was measured on this GB10</strong> (1.09–1.14× vs SDPA). A 2.2.0 <code>sm_121a</code> wheel was built and not runtime-tested. The project directory had been empty; this repository now holds the briefing only — weights are still not downloaded.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 0. BLOCKER ============ -->
+<section id="license">
+  <div class="shead"><span class="snum">00</span><h2>Read this before you download anything</h2></div>
+  <div class="stack col">
+    <div class="box stop">
+      <div class="boxlabel">Licensing gate</div>
+      <p>The MiniMax H3 Community License puts <strong>the United States in an Excluded Territory</strong>.
+      The weights are not access-gated on Hugging Face — no token, no click-through — so nothing will
+      stop you technically. The constraint is legal, not mechanical.</p>
+      <blockquote class="legal">5. “Excluded Territories” means the European Union, the United Kingdom,
+      the Republic of Korea and the United States of America.<br><br>
+      IV.4. You may not use, reproduce, modify, distribute, or display the MiniMax H3 Works or any of
+      their Outputs or results outside the Applicable Territory.</blockquote>
+      <p>Note the second clause covers <em>outputs</em>, not just weights. The license also names Hong Kong
+      courts as exclusive jurisdiction, and MiniMax offers an application path for Excluded Territory
+      deployments at <code>platform.minimax.io/h3-license</code>.</p>
+      <p>I'm flagging this because it's genuinely decision-changing and easy to miss — I fetched
+      <code>LICENSE</code> directly and quoted it verbatim rather than trusting a summary.
+      Where your Spark physically sits, and whether this is personal research or something else,
+      is your call to make, not mine to assume.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 1. THE ANSWER ============ -->
+<section id="verdict">
+  <div class="shead"><span class="snum">01</span><h2>Should you use vLLM?</h2></div>
+  <p class="sdek">You asked this directly, so here it is before the reasoning. My first instinct was wrong
+  and an adversarial check caught it.</p>
+  <div class="stack col">
+    <div class="box verdict">
+      <div class="boxlabel">Short answer</div>
+      <p><strong>Yes, vLLM can serve it — but I'd still start with ComfyUI.</strong></p>
+      <p>“vLLM can't do diffusion” is the answer I expected to give you, and it's wrong.
+      There is an official <code>dgx_spark_gb10: verified</code> profile for MiniMax H3 in the
+      vLLM recipes repo, with exact launch flags. But <em>verified</em> means “it runs,” not
+      “it's the best fit,” and on a 121 GiB box the two paths are far apart on headroom.</p>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <caption>The same model, two stacks, on your hardware class.</caption>
+        <thead><tr><th>&nbsp;</th><th>vLLM-Omni</th><th>ComfyUI</th></tr></thead>
+        <tbody>
+          <tr><td class="k">Download</td>
+            <td class="num">134 GiB <span class="chip c-m">Measured</span></td>
+            <td class="num good">39.6 GiB <span class="chip c-m">Measured</span></td></tr>
+          <tr><td class="k">Weights resident</td>
+            <td class="num bad">105.4 GiB</td>
+            <td class="num good">41.4 GiB</td></tr>
+          <tr><td class="k">Peak memory</td>
+            <td class="num bad">108–114 GiB of 121</td>
+            <td class="num good">~72 GiB</td></tr>
+          <tr><td class="k">Headroom left</td>
+            <td class="num bad">7.8 GiB, swap thrash to 12.6</td>
+            <td class="num good">~49 GiB</td></tr>
+          <tr><td class="k">Tasks available</td>
+            <td>fl2va <em>or</em> ref2va — one partition at a time. FL2VA serves both <code>t2va</code> and keyframe-conditioned <code>fl2va</code>. Ref2VA needs a restart.</td>
+            <td>All, including t2va</td></tr>
+          <tr><td class="k">Turbo LoRA</td>
+            <td class="bad">Not supported — zero occurrences of “lora” in the recipe</td>
+            <td class="good">Yes, first-class</td></tr>
+          <tr><td class="k">HTTP API</td>
+            <td class="good">OpenAI-style <code>POST /v1/videos/sync</code></td>
+            <td><code>POST /prompt</code>, needs a shim</td></tr>
+          <tr><td class="k">Known defect</td>
+            <td class="bad">Open issue #4: server wedges permanently on steps &gt;30 s, stays HTTP-200 healthy</td>
+            <td>Custom-node version drift</td></tr>
+          <tr><td class="k">Best Spark result</td>
+            <td class="num">111 s @ 768×448 <span class="chip c-p">Pub</span></td>
+            <td class="num">741 s @ 960×540, 15 s clip <span class="chip c-p">Pub</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box compute">
+      <div class="boxlabel">Recommendation</div>
+      <p><strong>ComfyUI first</strong>, because you said you want to learn this. It shows you every stage
+      of the pipeline as a separate node, it's where the turbo LoRAs and attention kernels actually work,
+      it leaves you 49 GiB of slack to experiment in, and it downloads 4× less.</p>
+      <p><strong>vLLM-Omni second</strong>, once you want a real HTTP endpoint. Its GB10 profile is
+      vendor-marked verified and it gives you an OpenAI-shaped API — but at 7.8 GiB of headroom with
+      an unfixed wedge bug, it is not where you want to be while still learning the model.
+      They aren't rivals: vLLM-Omni documents a ComfyUI frontend driving a hosted vLLM-Omni service.</p>
+    </div>
+
+    <div class="box">
+      <div class="boxlabel">The precise correction</div>
+      <p>“<code>pip install vllm</code> can serve H3” is <strong>false</strong>. Core vLLM lists zero
+      diffusion architectures; its MiniMax entries are <code>MiniMaxM2ForCausalLM</code> and
+      <code>MiniMaxM3SparseForCausalLM</code>, both text LLMs. The engine that works is
+      <strong>vLLM-Omni</strong>, a separate official <code>vllm-project</code> extension, needing
+      vLLM ≥ 0.26.0 plus current <code>vllm-omni</code> main.</p>
+      <p>Also worth knowing: a widely-cited vLLM issue claiming vLLM is entirely broken on DGX Spark
+      is <strong>stale</strong> — it predates the August arm64 image. You'll find it; ignore it.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 2. WHAT H3 IS ============ -->
+<section id="what">
+  <div class="shead"><span class="snum">02</span><h2>What MiniMax H3 actually is</h2></div>
+  <p class="sdek">Every figure below came out of the repo's own config files, then survived an
+  adversarial re-check against primary sources.</p>
+  <div class="stack col">
+    <p>It is not a video model. It's an <strong>omni-modal</strong> model that generates video
+    <em>and natively synchronized stereo audio in the same denoising loop</em> — no separate vocoder,
+    no audio post-pass. Speech, footsteps and score come out of the same forward passes as the pixels.
+    That single fact drives most of what follows.</p>
+
+    <div class="scroller">
+      <table>
+        <caption>From <code>transformer/config.json</code>, <code>model_index.json</code> and the HF API. <span class="chip c-p">Published</span></caption>
+        <thead><tr><th>Component</th><th>What it is</th><th>Size (bf16)</th></tr></thead>
+        <tbody>
+          <tr><td class="k">transformer</td><td>H3-Omni-Transformer — 50 layers, hidden 5376, 56 heads × 128, FFN 14336. Dense, single-stream DiT, 33.1 B params.</td><td class="num">61.7 GiB</td></tr>
+          <tr><td class="k">transformer_ref</td><td>Second partition for the ref2va task. Byte-identical config.</td><td class="num">61.7 GiB</td></tr>
+          <tr><td class="k">text_encoder</td><td><strong>Qwen3-VL-32B</strong> — yes, an LLM you already know, frozen. Reads the <em>unnormalized</em> hidden state after layer 50; the LM head is unused.</td><td class="num">62.1 GiB</td></tr>
+          <tr><td class="k">vae</td><td>Video VAE, 16× spatial / 4× temporal, 24 latent channels</td><td class="num">10.4 GB</td></tr>
+          <tr><td class="k">audio_vae</td><td>32 kHz in → 40 Hz latents, 32 channels, per-channel L/R</td><td class="num">0.6 GB</td></tr>
+          <tr><td class="k">scheduler ×2</td><td>Flow-matching. <code>shift=12.0</code> video, <code>shift=3.0</code> audio — two schedules stepped inside one transformer call</td><td class="num">—</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box compute">
+      <div class="boxlabel">The number that constrains everything</div>
+      <p>One DiT partition (61.7) + the Qwen3-VL conditioner (62.1) = <strong>123.8 GiB</strong> in bf16.
+      Your box has <span class="fig">121.7 GiB</span> total <span class="chip c-m">Measured</span>,
+      and Xorg plus gnome-shell are already holding 873 MiB of it.</p>
+      <p>bf16 does not fit. Not “is tight” — does not fit. <strong>Quantization is mandatory here for
+      capacity reasons</strong>, which is a completely different motivation from the speed reasons you
+      quantize an LLM for. Hold that thought; <a href="#roofline">§07</a> shows it buys you almost no speed at all.</p>
+    </div>
+
+    <dl>
+      <div><dt>Fixed 24 fps, quantized durations</dt>
+        <dd>Frame counts snap to <code>17n+5</code>, so legal clips are 5.17 s / 8.00 s / 10.13 s / 15.08 s.
+        Max canvas is exactly 1344×768 = 1,032,192 px. You do not get arbitrary lengths the way an LLM
+        gives you arbitrary token counts.</dd></div>
+      <div><dt>No CFG, at all</dt>
+        <dd>The released weights are <strong>guidance-distilled</strong>. There is no
+        <code>guidance_scale</code>, no <code>negative_prompt</code>, and exactly one forward pass per step.
+        Every guide you read about “CFG doubles your batch” is already handled — don't go looking for the knob.</dd></div>
+      <div><dt>No cross-attention to text</dt>
+        <dd>Unlike Wan, H3 is single-stream: text conditioning, keyframe latents, audio latents and video
+        latents are packed into <em>one sequence</em> and self-attended together. This is why the sequence
+        gets so long, and why <a href="#roofline">§07</a>'s attention math dominates.</dd></div>
+      <div><dt>~13 B of the 33 B is AdaLN</dt>
+        <dd>Those modulation outputs can be precomputed and cached, so inference-only deployments needn't
+        load them — hence community “pruned” checkpoints around 20.1 B.</dd></div>
+    </dl>
+
+    <h3 id="why-different">Why the two stacks need wildly different amounts</h3>
+    <p>The natural assumption is that you need the weights either way, so the memory should be similar.
+    It isn't — by 64 GiB — and the reasons are worth understanding because they generalize to every
+    diffusion deployment you'll do.</p>
+
+    <p><strong>First: the repo is a menu, not a bundle.</strong> <code>Comfy-Org/MiniMax-H3</code> totals
+    438.6 GiB <span class="chip c-m">Measured</span>, but its ten <code>diffusion_models/</code> files are
+    the same model at different precisions. You take one row.</p>
+
+    <div class="scroller">
+      <table>
+        <caption>The <code>fl2va</code> partition, as actually published. Pick one. <span class="chip c-m">Measured via HF API</span></caption>
+        <thead><tr><th>File</th><th>Params</th><th>GiB</th></tr></thead>
+        <tbody>
+          <tr><td class="k">minimax_h3_fl2va_bf16</td><td class="num">33.1 B</td><td class="num">61.73</td></tr>
+          <tr><td class="k">minimax_h3_fl2va_pruned_bf16</td><td class="num">20.1 B</td><td class="num">37.46</td></tr>
+          <tr><td class="k">minimax_h3_fl2va_int8_convrot</td><td class="num">33.1 B</td><td class="num">31.70</td></tr>
+          <tr><td class="k">minimax_h3_fl2va_pruned_int8_convrot</td><td class="num">20.1 B</td><td class="num good">19.53</td></tr>
+          <tr><td class="k">minimax_h3_fl2va_pruned_fp8_scaled</td><td class="num">20.1 B</td><td class="num good">19.52</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><strong>Second: “pruned” is a refactorization, and it <em>is</em> mildly lossy.</strong>
+    See <a href="#pruning">§03</a> — the model card's “precomputed and cached” framing oversimplifies
+    what the checkpoint actually does, and there is a LoRA compatibility trap attached to it.</p>
+
+    <p><strong>Third — and this is where the 64 GiB actually goes — who quantizes what.</strong>
+    vLLM's GB10 profile passes <code>--quantization fp8</code>, which is <em>online</em>: it reads full
+    bf16 from disk and converts during load. That's why its download can't shrink — the quantizer needs
+    bf16 input. ComfyUI consumes weights someone already quantized offline. But the decisive detail is
+    <em>scope</em>: vLLM's online FP8 touches the <strong>DiT only</strong>, leaving the Qwen3-VL-32B
+    conditioner at full bf16.</p>
+
+    <div class="scroller">
+      <table>
+        <caption>Resident weights. The 105.4 GiB total independently reproduces vLLM's own note that the GB10 partition lands at “roughly 104 GiB.”</caption>
+        <thead><tr><th>Component</th><th>vLLM-Omni</th><th>ComfyUI (lean)</th></tr></thead>
+        <tbody>
+          <tr><td class="k">DiT</td><td class="num">33.00 <span class="chip c-s">fp8, 33 B</span></td><td class="num">19.53 <span class="chip c-s">pruned+int8, 20 B</span></td></tr>
+          <tr><td class="k">Text encoder</td><td class="num bad">62.14 <span class="chip c-s">bf16</span></td><td class="num good">14.61 <span class="chip c-s">nvfp4-awq</span></td></tr>
+          <tr><td class="k">VAEs</td><td class="num">10.26</td><td class="num">5.41</td></tr>
+          <tr><td class="k">Turbo LoRA</td><td class="num">—</td><td class="num">1.82</td></tr>
+          <tr><td class="k"><strong>Total</strong></td><td class="num bad"><strong>105.40 GiB</strong></td><td class="num good"><strong>41.37 GiB</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><strong>The text encoder alone is 47.5 of the 64 GiB gap</strong> — a frozen LLM used as a feature
+    extractor, carried at full precision because the DiT-only quantizer never touches it.</p>
+
+    <div class="box bw">
+      <div class="boxlabel">And peak is not the same as resident</div>
+      <p>The rest of the gap between 41 GiB resident and ~72 GB peak is activations, attention workspace,
+      and VAE decode buffers — temporal VAE decode inflates every frame at once and is a known spike.</p>
+      <p>But the structural reason vLLM peaks higher is that <strong>it is a server</strong>. It keeps all
+      five models warm so the second request doesn't pay the 519–543 s cold start. ComfyUI can sequence the
+      pipeline — encode the prompt, free the text encoder, denoise, free the DiT, decode — because it's a
+      workstation tool that accepts reload cost. That's a latency-for-memory trade baked into what each
+      thing <em>is</em>, not an efficiency difference between them.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 2b. PRUNING ============ -->
+<section id="pruning">
+  <div class="shead"><span class="snum">03</span><h2>What “pruned” actually removes</h2></div>
+  <p class="sdek">Determined by range-requesting the safetensors headers — 57 KB out of a 61 GiB file
+  is enough to list every tensor. <span class="chip c-m">Measured</span></p>
+  <div class="stack col">
+
+    <div class="box stop">
+      <div class="boxlabel">Correction</div>
+      <p>An earlier draft of this briefing said pruning was “free, not lossy.” That repeated the model
+      card's framing without checking it. <strong>It is mildly lossy</strong>, and the detail matters
+      because it also creates a LoRA incompatibility.</p>
+    </div>
+
+    <p>Only <strong>four</strong> tensors are genuinely deleted — the <code>time_embedder</code>,
+    about 20 M params. The other 13.0 B are <em>refactored</em>:</p>
+
+    <div class="scroller">
+      <table>
+        <caption>Header diff, <code>fl2va_bf16</code> vs <code>fl2va_pruned_bf16</code>. 535 → 532 tensors, 33.12 B → 20.11 B params.</caption>
+        <thead><tr><th>Tensor</th><th>Full</th><th>Pruned</th></tr></thead>
+        <tbody>
+          <tr><td class="k">blocks.N.adaln_proj.linear.weight</td><td class="num">[96768, 2688] BF16</td><td class="num hot">[96768, 8] F16</td></tr>
+          <tr><td class="k">blocks.N.adaln_proj.linear.bias</td><td class="num">[96768] BF16</td><td class="num">[96768] F16</td></tr>
+          <tr><td class="k">time_embedder.*</td><td class="num">4 tensors</td><td class="num bad">removed</td></tr>
+          <tr><td class="k">adaln_t_table</td><td class="num">—</td><td class="num good">[1025, 8] F32 added</td></tr>
+          <tr><td class="k">all 531 others (qkv, out_proj, fc1, fc2 …)</td><td colspan="2" class="num good">identical shape and dtype</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The original path is <code>t → time_embedder → 2688-dim → [96768×2688] → modulation</code>.
+    The pruned path is <code>t → adaln_t_table[t] → 8-dim → [96768×8] → modulation</code>. As the
+    timestep sweeps its range the modulation output traces a curve that lies near enough in an
+    <strong>8-dimensional subspace</strong>, so they re-expressed the projection in that basis with a
+    1025-entry lookup table.</p>
+
+    <p>Two real approximation sources follow: the rank-8 basis is a fit, not an identity; and timesteps
+    off the 1025-point grid must interpolate. The BF16 → <strong>F16</strong> switch on exactly these
+    tensors (10 mantissa bits instead of 7) is a deliberate precision increase to offset it — which tells
+    you the authors knew it was lossy.</p>
+
+    <div class="box compute">
+      <div class="boxlabel">Why it still probably doesn't matter much</div>
+      <p>Every tensor on the <em>content path</em> is untouched. AdaLN never sees your latents — it emits
+      per-timestep scale/shift/gate scalars, a smooth low-frequency control signal shared across all
+      tokens. Error there changes <em>how strongly block 31 modulates at step 7</em>, not the learned
+      features.</p>
+      <p>By contrast <code>int8_convrot</code> quantizes the actual matrices your latents flow through.
+      <strong>The quantization is very likely the larger quality risk than the pruning</strong> — and
+      nobody flinches at that one.</p>
+    </div>
+
+    <h3>The compatibility trap</h3>
+    <div class="box stop">
+      <div class="boxlabel">Do not mix LoRA repos with base repos</div>
+      <div class="kv" style="margin-bottom:4px">
+        <dt>larryvrh v4</dt><dd>blocks.N.adaln_proj.linear.lora_A.weight <b>[16, 2688]</b> — 102 adaln tensors</dd>
+        <dt>Comfy-Org</dt><dd>zero adaln tensors — qkv / out_proj / fc1 / fc2 only</dd>
+        <dt>pruned base</dt><dd>adaln_proj input dim is <b>8</b>, not 2688</dd>
+      </div>
+      <p>larryvrh's 102 adaln tensors <strong>cannot apply</strong> to a pruned checkpoint. You get either
+      a hard shape error or — worse — a loader that silently skips them and hands you a partially applied
+      LoRA that quietly underperforms. Comfy-Org's repack strips the adaln LoRA precisely because it
+      targets the pruned base. Keep the pair matched.</p>
+    </div>
+
+    <h3>If you want the variable gone</h3>
+    <p>You have the headroom to simply not prune. Fixed cost is 21.84 GiB (NVFP4 text encoder + VAEs + LoRA):</p>
+    <div class="scroller">
+      <table>
+        <caption>Estimated peak adds the ~30 GiB runtime overhead implied by the published 72 GB peak against 41.4 GiB of weights — an inference of mine, and it grows with resolution and frame count.</caption>
+        <thead><tr><th>DiT variant</th><th>DiT</th><th>+ fixed</th><th>Est. peak</th><th>Isolates</th></tr></thead>
+        <tbody>
+          <tr><td class="k">fl2va_bf16</td><td class="num">61.73</td><td class="num">83.6</td><td class="num bad">~114 GiB</td><td>nothing — reference</td></tr>
+          <tr><td class="k">fl2va_pruned_bf16</td><td class="num">37.46</td><td class="num">59.3</td><td class="num">~89 GiB</td><td><strong>pruning only</strong>, zero quant error</td></tr>
+          <tr><td class="k">fl2va_int8_convrot</td><td class="num">31.70</td><td class="num">53.5</td><td class="num good">~84 GiB</td><td><strong>quantization only</strong>, unpruned</td></tr>
+          <tr><td class="k">fl2va_pruned_int8_convrot</td><td class="num">19.53</td><td class="num">41.4</td><td class="num good">~72 GiB</td><td>both</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><strong><code>fl2va_pruned_bf16</code> is the escape hatch</strong> — unpruned-quality weights with
+    zero quantization error, 18 GiB more than the lean config, comfortably in budget. It is also the clean
+    A/B if you want to measure the pruning effect with no quantization confound: run it against
+    <code>fl2va_bf16</code> on a fixed seed.</p>
+    <p>Note the <code>int8_convrot</code> rows are <em>not</em> the escape hatch, despite being the obvious
+    “unpruned but smaller” choice — <a href="#config">§04</a> measures INT8 at <strong>0.63× bf16</strong>
+    on this silicon, so they cost quality <em>and</em> speed.</p>
+    <p><strong>No quality comparison across these variants has been published on any hardware.</strong>
+    With 2.6 TB free you can pull two and diff them on a fixed seed — a few hundred GB and an afternoon,
+    and it would be genuinely new data.</p>
+  </div>
+</section>
+
+<!-- ============ 2c. THE CONFIG ============ -->
+<section id="config">
+  <div class="shead"><span class="snum">04</span><h2>The config to actually use</h2></div>
+  <p class="sdek">Decided by benchmarking every candidate dtype on the target silicon rather than by
+  what the community defaults to.</p>
+  <div class="stack col">
+
+    <div class="box compute">
+      <div class="boxlabel">The measurement that settles it</div>
+      <div class="bars">
+        <div class="bar"><span class="lab">fp8_e4m3</span><span class="track"><span class="fill f-compute" style="width:100%"></span></span><span class="val">192.2 · 2.07×</span></div>
+        <div class="bar"><span class="lab">bf16</span><span class="track"><span class="fill f-mute" style="width:48.3%"></span></span><span class="val">92.8 · 1.00×</span></div>
+        <div class="bar"><span class="lab">int8</span><span class="track"><span class="fill f-bw" style="width:30.2%"></span></span><span class="val">58.1 · 0.63×</span></div>
+      </div>
+      <p style="margin-top:12px">TFLOP/s at 8192³ on sm_121 <span class="chip c-m">Measured</span>.
+      <strong>INT8 tensor cores are slower than bf16 on GB10</strong> — Blackwell's consumer die
+      prioritized FP8/FP4 and deprioritized INT8. Even the dequant-to-bf16 fallback only reaches 0.85×.</p>
+      <p>So every <code>int8_convrot</code> variant is <strong>dominated</strong>: smaller than bf16 but
+      slower, on a machine that is compute-bound. Paying quantization error to go slower is the worst
+      trade on the menu.</p>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <caption>Five files. ~12 min to download at the measured 71.9 MB/s; est. peak ~82 GiB, leaving ~39 GiB slack.</caption>
+        <thead><tr><th>Role</th><th>File</th><th>GiB</th></tr></thead>
+        <tbody>
+          <tr><td>DiT</td><td class="k">diffusion_models/minimax_h3_fl2va_pruned_fp8_scaled</td><td class="num">19.52</td></tr>
+          <tr><td>Text encoder</td><td class="k">text_encoders/qwen3vl_32b_minimax_h3_int8_convrot</td><td class="num">25.28</td></tr>
+          <tr><td>Video VAE</td><td class="k">vae/minimax_h3_video_vae_fp16</td><td class="num">4.85</td></tr>
+          <tr><td>Audio VAE</td><td class="k">vae/minimax_h3_audio_vae_fp32</td><td class="num">0.56</td></tr>
+          <tr><td>Turbo LoRA</td><td class="k">loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16</td><td class="num">1.82</td></tr>
+          <tr><td><strong>Total</strong></td><td>&nbsp;</td><td class="num good"><strong>52.03</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <dl>
+      <div><dt>fp8 for the DiT, despite the pruning</dt>
+        <dd>There is no unpruned fp8 variant, so pruning comes along. But compare honestly:
+        <code>fp8_scaled</code> puts its error on the modulation path (<a href="#pruning">§03</a>) and runs
+        2.07×; <code>int8_convrot</code> unpruned puts its error on the <em>content path</em> and runs 0.63×.
+        The unpruned option is worse on both axes.</dd></div>
+      <div><dt>int8 for the text encoder — same format, opposite call</dt>
+        <dd>The 0.63× penalty is irrelevant here because the conditioner runs <strong>once per
+        generation, not once per step</strong> — roughly 0% of runtime. What matters is prompt adherence,
+        and 8-bit beats the 4-bit <code>nvfp4_awq</code> for 10.7 GiB you can spare. The general rule:
+        <strong>inside the denoising loop optimize throughput, outside it optimize quality.</strong></dd></div>
+      <div><dt>Skip ref2va</dt>
+        <dd><code>fl2va</code> covers text-to-video and image-to-video — the keyframe is optional
+        conditioning. <code>ref2va</code> is only for omni-reference mode. Saves 19–32 GiB.</dd></div>
+      <div><dt>8-step LoRA, not 4-step</dt>
+        <dd>The author states 4 steps still smears on fast motion and 6–8 is where it holds. Use the
+        Comfy-Org repack — zero <code>adaln</code> tensors, so it fits the pruned base. larryvrh's does not.</dd></div>
+    </dl>
+
+    <div class="box compute">
+      <div class="boxlabel">Launch flags — one of them is a 2.4× swing</div>
+      <p><code>--fast fp8_matrix_mult --disable-pinned-memory</code></p>
+      <p>Both verified against ComfyUI's <code>cli_args.py</code>. <strong>Without
+      <code>fp8_matrix_mult</code>, ComfyUI upcasts fp8 → bf16 and you get 0.85× instead of 2.07×.</strong>
+      <code>--disable-pinned-memory</code> is free because pinned measured identical to pageable on unified
+      memory — pinning is pure allocator overhead here.</p>
+      <p>I also checked whether ComfyUI would detect fp8 support on sm_121 at all, since PyTorch itself
+      warns that 12.1 is “outside supported range.” It does: the gate is <code>props.major &gt;= 9</code>
+      and GB10 reports major 12, so <code>--supports-fp8-compute</code> is unnecessary. NVFP4 detection
+      (<code>major &gt;= 10</code>) passes too.</p>
+      <p>Do <strong>not</strong> pass <code>--lowvram</code> or <code>--novram</code>.</p>
+    </div>
+
+    <div class="box stop">
+      <div class="boxlabel">Verify this on your first run</div>
+      <p>I confirmed the flag exists and that fp8 is detected — <strong>not</strong> that ComfyUI's H3
+      model code actually routes through <code>torch._scaled_mm</code>. Test it: same seed, with and
+      without <code>--fast fp8_matrix_mult</code>. If step time roughly halves you are on native fp8.
+      If it barely moves, the model path is dequantizing, the fp8-vs-int8 distinction stops mattering,
+      and <code>fl2va_pruned_bf16</code> (37.46 GiB) becomes the better pick — you would be paying
+      quantization error for nothing.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PRIMER ============ -->
+<section id="dit">
+  <div class="shead"><span class="snum">05</span><h2>How generation actually works</h2></div>
+  <p class="sdek">What a DiT is, where the noise comes from, and why nothing in this system contains a
+  video until the loop has finished making one.</p>
+  <div class="stack col">
+
+    <h3>The name is the two halves</h3>
+    <p><strong>Diffusion</strong> is the method — how you generate. <strong>Transformer</strong> is the
+    architecture doing the work. A DiT is just “we used a Transformer as the engine inside a diffusion
+    model.” Stable Diffusion 1.x used a U-Net, a convolutional design; around 2023 Transformers were found
+    to scale better, and every serious video model now is a DiT.</p>
+
+    <h3>The trick</h3>
+    <p>Teaching a network to <em>draw a cat</em> is hard. Teaching it to <em>look at a slightly-noisy cat
+    and guess which part is noise</em> is much easier. Diffusion models only ever learn the easy task,
+    then get the hard one by repeating it 20–50 times.</p>
+    <p><strong>The network never draws anything.</strong> It only ever answers “which part of what I'm
+    seeing is noise?” — that answer is subtracted, and the result is fed back in. One pass through that is
+    one <em>step</em>. This is why there is no streaming: at step 10 of 20 you don't have half a video, you
+    have a full-length video that still looks like fog.</p>
+
+    <h3>Why a Transformer</h3>
+    <p>Guessing the noise needs <strong>global context</strong>. To know whether this patch is noise you
+    need to know what's happening in the rest of the frame — and in every other frame, because the cat's
+    tail in frame 200 must belong to the same cat as the head in frame 1. Attention is exactly the
+    mechanism that lets every position see every other position.</p>
+    <p>That requirement <em>is</em> your performance problem. It's the direct cause of the O(n²) cost that
+    <a href="#roofline">§07</a> measures at 70% of runtime.</p>
+
+    <h3>Where the noise comes from — not from any model</h3>
+    <div class="box compute">
+      <div class="boxlabel">The most common misconception</div>
+      <p>The starting noise is produced by a random number generator. That's it —
+      <code>torch.randn(shape, generator=seed)</code>. Pure Gaussian noise shaped like a compressed video.
+      Nothing derives it from data, and no model generates it.</p>
+      <p>This is what a <strong>seed</strong> is: it picks which random canvas you start from. Same seed
+      plus same prompt gives an identical video every time; changing only the seed gives a completely
+      different take on the same prompt.</p>
+      <p>Qwen3-VL-32B does <strong>not</strong> produce it, and does not produce video. It converts your
+      prompt into vectors, runs exactly once before the loop starts, and its output is then held constant
+      for all 20 steps. Its language-model head is unused. It is an expensive prompt-to-vectors converter —
+      expensive because prompt understanding is what decides whether “a cat knocking a glass off a table”
+      produces the right <em>sequence of events</em>.</p>
+    </div>
+
+    <figure>
+      <div class="svgwrap">
+      <svg viewBox="0 0 940 400" role="img" aria-label="Four sources feed rows into one packed sequence; only the video and audio rows, which start as random noise, are rewritten by the 50 DiT blocks across 20 steps, after which the VAEs decode them to an mp4.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" fill="currentColor"/>
+          </marker>
+          <marker id="arh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="dhot"/>
+          </marker>
+        </defs>
+
+        <!-- sources -->
+        <text x="16" y="18" class="dhead">sources</text>
+        <rect x="16" y="40" width="140" height="34" rx="5" class="dbox-cold"/>
+        <text x="86" y="61" class="dlabel" text-anchor="middle">Qwen3-VL-32B</text>
+        <rect x="16" y="86" width="140" height="34" rx="5" class="dbox-cold"/>
+        <text x="86" y="107" class="dlabel" text-anchor="middle">video VAE</text>
+        <rect x="16" y="164" width="140" height="40" rx="5" class="dbox-hot"/>
+        <text x="86" y="181" class="dlabel" text-anchor="middle" fill="var(--compute)">randn(seed)</text>
+        <text x="86" y="196" class="dlabel-s" text-anchor="middle">a random canvas</text>
+
+        <!-- packed sequence -->
+        <text x="236" y="18" class="dhead">one packed sequence</text>
+        <rect x="228" y="28" width="250" height="278" rx="7" class="dbox"/>
+
+        <rect x="242" y="40" width="222" height="34" rx="4" class="dbox-cold"/>
+        <text x="252" y="55" class="dlabel">text conditioning</text>
+        <text x="252" y="68" class="dlabel-s">~200 rows · read-only</text>
+
+        <rect x="242" y="86" width="222" height="34" rx="4" class="dbox-cold"/>
+        <text x="252" y="101" class="dlabel">keyframe latents</text>
+        <text x="252" y="114" class="dlabel-s">~1,000 rows · read-only</text>
+
+        <rect x="242" y="132" width="222" height="104" rx="4" class="dbox-hot"/>
+        <text x="252" y="152" class="dlabel" fill="var(--compute)">video latents</text>
+        <text x="252" y="167" class="dlabel-s">91,728 rows</text>
+        <text x="252" y="181" class="dlabel-s">≈99% of the sequence</text>
+        <text x="252" y="205" class="dlabel-s">starts as noise</text>
+        <text x="252" y="219" class="dlabel-s">rewritten every step</text>
+
+        <rect x="242" y="248" width="222" height="44" rx="4" class="dbox-hot"/>
+        <text x="252" y="266" class="dlabel" fill="var(--compute)">audio latents</text>
+        <text x="252" y="281" class="dlabel-s">~600 rows · 40 Hz</text>
+
+        <!-- source arrows -->
+        <line x1="156" y1="57" x2="240" y2="57" class="dline" marker-end="url(#ar)"/>
+        <line x1="156" y1="103" x2="240" y2="103" class="dline" marker-end="url(#ar)"/>
+        <line x1="156" y1="184" x2="240" y2="184" class="dline-hot" marker-end="url(#arh)"/>
+        <path d="M120,204 L120,270 L240,270" class="dline-hot" marker-end="url(#arh)"/>
+
+        <!-- DiT -->
+        <rect x="556" y="140" width="150" height="96" rx="7" class="dbox"/>
+        <text x="631" y="176" class="dhead" text-anchor="middle">50 DiT blocks</text>
+        <text x="631" y="196" class="dlabel-s" text-anchor="middle">predicts the noise</text>
+        <text x="631" y="212" class="dlabel-s" text-anchor="middle">in the hot rows</text>
+
+        <line x1="478" y1="170" x2="552" y2="170" class="dline" marker-end="url(#ar)"/>
+        <text x="515" y="160" class="dlabel-s" text-anchor="middle">reads</text>
+        <text x="515" y="149" class="dlabel-s" text-anchor="middle">all rows</text>
+
+        <!-- loop back -->
+        <path d="M631,236 L631,352 L353,352 L353,310" class="dline-hot" marker-end="url(#arh)"/>
+        <text x="492" y="368" class="dlabel" text-anchor="middle" fill="var(--compute)">subtract noise, write back — hot rows only · ×20 steps</text>
+
+        <!-- decode -->
+        <rect x="782" y="140" width="142" height="96" rx="7" class="dbox-cold"/>
+        <text x="853" y="172" class="dlabel" text-anchor="middle">video VAE</text>
+        <text x="853" y="190" class="dlabel" text-anchor="middle">audio VAE</text>
+        <text x="853" y="212" class="dlabel-s" text-anchor="middle">→ mp4</text>
+        <line x1="706" y1="188" x2="778" y2="188" class="dline" marker-end="url(#ar)"/>
+        <text x="742" y="178" class="dlabel-s" text-anchor="middle">after</text>
+        <text x="742" y="167" class="dlabel-s" text-anchor="middle">step 20</text>
+      </svg>
+      </div>
+      <figcaption>Only the orange rows are generated. The text and keyframe rows are written once, before
+      the loop, and then merely read by attention so the noise rows know what to become — conditioning is
+      not a separate input channel, it is other rows in the same sequence.</figcaption>
+    </figure>
+
+    <h3>What a “token” is here</h3>
+    <p>In Qwen a token is a word-piece. In a DiT it is a small patch of compressed video:</p>
+    <div class="box">
+      <div class="kv">
+        <dt>want</dt><dd>1344 × 768 pixels × 362 frames</dd>
+        <dt>video VAE</dt><dd>÷16 spatial, ÷4 temporal → 84 × 48 × 91 latents, 24 channels</dd>
+        <dt>patchify [1,2,2]</dt><dd>÷2 spatial again → 42 × 24 × 91</dd>
+        <dt>sequence</dt><dd><strong>91,728 tokens</strong>, each a vector of 5,376 numbers</dd>
+      </div>
+    </div>
+    <p>Comparable to a long LLM context — except every token attends to every other one, and the whole
+    thing runs 20–50 times instead of once.</p>
+
+    <h3>Inside one block — and why those tensor names look familiar</h3>
+    <p>The network needs to know <em>how noisy</em> the input is right now: “remove noise from something
+    95% noisy” is a different job from “polish something 5% noisy.” Rather than feed that in as another
+    token, a DiT injects it as a <strong>dial on every block</strong> — scale, shift and gate values that
+    modulate the block's behaviour. That is AdaLN, Adaptive Layer Norm.</p>
+
+    <figure>
+      <div class="svgwrap">
+      <svg viewBox="0 0 900 290" role="img" aria-label="Inside one DiT block: the timestep drives adaln_proj, which modulates the attention and MLP stages on the main token path; the tensor names shown are the ones present in the checkpoint files.">
+        <defs>
+          <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" fill="currentColor"/>
+          </marker>
+          <marker id="ar2h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" class="dhot"/>
+          </marker>
+        </defs>
+
+        <!-- timestep side channel -->
+        <rect x="150" y="26" width="128" height="36" rx="5" class="dbox-hot"/>
+        <text x="214" y="49" class="dlabel" text-anchor="middle" fill="var(--compute)">timestep t</text>
+        <rect x="330" y="26" width="222" height="36" rx="5" class="dbox-hot"/>
+        <text x="441" y="43" class="dlabel" text-anchor="middle" fill="var(--compute)">adaln_proj</text>
+        <text x="441" y="56" class="dlabel-s" text-anchor="middle">18 scale / shift / gate vectors</text>
+        <line x1="278" y1="44" x2="326" y2="44" class="dline-hot" marker-end="url(#ar2h)"/>
+        <text x="640" y="40" class="dlabel-s">same for all 91,728 tokens</text>
+        <text x="640" y="54" class="dlabel-s">→ this is what “pruned” compresses</text>
+
+        <path d="M380,62 L380,118 L262,118 L262,150" class="dline-hot" marker-end="url(#ar2h)"/>
+        <path d="M500,62 L500,118 L594,118 L594,150" class="dline-hot" marker-end="url(#ar2h)"/>
+
+        <!-- main path -->
+        <text x="16" y="176" class="dlabel" text-anchor="start">tokens</text>
+        <text x="16" y="190" class="dlabel" text-anchor="start">in</text>
+        <line x1="66" y1="182" x2="196" y2="182" class="dline" marker-end="url(#ar2)"/>
+
+        <rect x="196" y="152" width="132" height="60" rx="5" class="dbox"/>
+        <text x="262" y="177" class="dlabel" text-anchor="middle">self-attention</text>
+        <text x="262" y="193" class="dlabel-s" text-anchor="middle">attn.qkv_proj</text>
+        <text x="262" y="205" class="dlabel-s" text-anchor="middle">attn.out_proj</text>
+
+        <circle cx="368" cy="182" r="13" class="dbox"/>
+        <text x="368" y="187" class="dlabel" text-anchor="middle">+</text>
+        <line x1="328" y1="182" x2="352" y2="182" class="dline" marker-end="url(#ar2)"/>
+
+        <rect x="528" y="152" width="132" height="60" rx="5" class="dbox"/>
+        <text x="594" y="177" class="dlabel" text-anchor="middle">MLP</text>
+        <text x="594" y="193" class="dlabel-s" text-anchor="middle">mlp.fc1  5376→14336</text>
+        <text x="594" y="205" class="dlabel-s" text-anchor="middle">mlp.fc2  14336→5376</text>
+        <line x1="384" y1="182" x2="524" y2="182" class="dline" marker-end="url(#ar2)"/>
+
+        <circle cx="700" cy="182" r="13" class="dbox"/>
+        <text x="700" y="187" class="dlabel" text-anchor="middle">+</text>
+        <line x1="660" y1="182" x2="684" y2="182" class="dline" marker-end="url(#ar2)"/>
+        <line x1="716" y1="182" x2="790" y2="182" class="dline" marker-end="url(#ar2)"/>
+        <text x="800" y="176" class="dlabel">tokens</text>
+        <text x="800" y="190" class="dlabel">out</text>
+
+        <!-- residual skips -->
+        <path d="M170,182 L170,240 L368,240 L368,199" class="dline"/>
+        <path d="M410,182 L410,240 L700,240 L700,199" class="dline"/>
+        <text x="452" y="256" class="dlabel-s" text-anchor="middle">residual connections</text>
+
+        <text x="450" y="282" class="dlabel-s" text-anchor="middle">× 50 blocks, then × 20 steps</text>
+      </svg>
+      </div>
+      <figcaption>The tensor names are verbatim from the checkpoint. This is also exactly what the turbo
+      LoRA adapts — qkv_proj, out_proj, fc1, fc2 across all 50 blocks, i.e. the entire computational core.</figcaption>
+    </figure>
+
+    <p>The property that matters: <strong>AdaLN depends only on the step number, never on your content.</strong>
+    At step 7 all 91,728 tokens receive the same modulation values. That is precisely why 13 B of
+    parameters can be collapsed into a lookup table — see <a href="#pruning">§03</a>.</p>
+
+    <h3>Two ways to condition, and why they differ</h3>
+    <p>Worth knowing because it decides which task mode you want:</p>
+    <dl>
+      <div><dt>Keyframes (fl2va) go through the video VAE</dt>
+        <dd>Your input image must be <em>pixel-exact</em> — frame 1 of the output <em>is</em> your image —
+        so it is encoded into the same latent space as the output and dropped in as
+        “keyframe conditioning latents.”</dd></div>
+      <div><dt>References (ref2va) go through Qwen3-VL's vision tower</dt>
+        <dd>These only need to convey identity or style, not exact pixels, so they ride the semantic
+        encoder — and the diffusers docs note they are placed on <strong>the conditioner's 2 fps grid</strong>,
+        a much coarser sampling than the 24 fps output.</dd></div>
+    </dl>
+
+    <div class="box bw">
+      <div class="boxlabel">The whole pipeline, in order</div>
+      <ol>
+        <li><strong>Once, before the loop</strong> — Qwen3-VL encodes your prompt into vectors.</li>
+        <li><strong>Once, before the loop</strong> — <code>randn(seed)</code> creates the canvas.</li>
+        <li><strong>20 times</strong> — the 50 DiT blocks read the whole sequence, predict the noise in the
+        hot rows, subtract a little. <em>This is 99% of your runtime.</em></li>
+        <li><strong>Once, after the loop</strong> — the VAEs decode latents into pixels and stereo audio.</li>
+      </ol>
+      <p>Everything in <a href="#optimizations">the optimization ladder</a> attacks line 3, and only in two
+      ways: make each pass cheaper (SageAttention, Sol-Attn, fp8) or do fewer passes (turbo LoRA, caching).</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3. VIDEO VS LLM ============ -->
+<section id="concepts">
+  <div class="shead"><span class="snum">06</span><h2>How this differs from every Qwen you've deployed</h2></div>
+  <p class="sdek">You have vLLM, llama.cpp and 200 GB of Qwen checkpoints on this box already.
+  Here is precisely which of those instincts transfer and which actively mislead.</p>
+  <div class="stack col">
+
+    <h3>The loop is inverted</h3>
+    <p>An LLM does <em>many cheap passes</em>: one forward pass per token, each touching all weights but
+    computing on a single new position. Generation length is discovered at runtime; the model stops when
+    it emits EOS.</p>
+    <p>A diffusion model does <em>few enormous passes</em>: a fixed number of denoising steps decided
+    <em>before</em> generation starts, each one a full bidirectional pass over the entire output at once.
+    A “step” is a point on a scheduler's sigma grid, not a token. There is no EOS and no streaming —
+    at 40% of the steps you don't have 40% of the video, you have a full-length video that still looks
+    like noise.</p>
+
+    <h3>The one intuition that transfers</h3>
+    <p>Both read the whole weight set repeatedly. For an LLM that's per <em>token</em>; for a diffusion
+    model it's per <em>step</em>. So “tokens/sec ≈ bandwidth ÷ model bytes” has a direct analogue —
+    it's just that for video the analogue lands nowhere near the binding constraint, because each sweep
+    does vastly more arithmetic. That's <a href="#roofline">§07</a>.</p>
+
+    <div class="scroller">
+      <table>
+        <caption>What carries over from your vLLM experience, and what doesn't.</caption>
+        <thead><tr><th>LLM concept</th><th>On a video DiT</th></tr></thead>
+        <tbody>
+          <tr><td class="k">KV cache</td><td class="bad">Does not exist. No causal prefix — every token's value is rewritten every step, so nothing from step <em>t</em> is valid at <em>t+1</em>.</td></tr>
+          <tr><td class="k">PagedAttention</td><td class="bad">Nothing to page. The sequence is fixed-length from step 1.</td></tr>
+          <tr><td class="k">Continuous batching</td><td class="bad">Pointless. Step counts are known and identical; vLLM-Omni uses an async task queue instead, one request per diffusion batch.</td></tr>
+          <tr><td class="k">Speculative decoding</td><td class="bad">No token loop to speculate over. <em>Closest analogue:</em> step distillation — see <a href="#optimizations">§08</a>.</td></tr>
+          <tr><td class="k">Prefix caching</td><td>Helps only the Qwen3-VL conditioner — a rounding error beside 50 DiT blocks × N steps.</td></tr>
+          <tr><td class="k">Quantization for speed</td><td class="bad">Inverted. On an LLM, 4-bit ≈ 1.5–2× faster. Here it buys capacity and near-zero speed. <a href="#roofline">Why</a>.</td></tr>
+          <tr><td class="k">Weight streaming / offload</td><td class="bad">Useless here — host RAM <em>is</em> VRAM on Spark, so offload buys zero capacity.</td></tr>
+          <tr><td class="k">Single monolithic graph</td><td>Five separate models: text encoder → DiT ×N steps → video VAE + audio VAE. Each loads, runs, and ideally unloads.</td></tr>
+          <tr><td class="k">TTFT + streaming</td><td>One long opaque wait, then a file. This is why the ecosystem uses job queues, not streaming APIs.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Where the sequence length comes from</h3>
+    <p>This is the piece with no LLM equivalent, and it's worth doing by hand once. A 15-second clip
+    at 1344×768:</p>
+    <div class="box">
+      <div class="kv">
+        <dt>pixels</dt><dd>1344 × 768 × 362 frames</dd>
+        <dt>VAE</dt><dd>÷16 spatial, ÷4 temporal → 84 × 48 × 91</dd>
+        <dt>patchify [1,2,2]</dt><dd>÷2 spatial again → 42 × 24 × 91</dd>
+        <dt>sequence</dt><dd><strong>91,728 tokens</strong> — and unlike an LLM's context, every one attends to every other, at every step, 50 times over</dd>
+      </div>
+    </div>
+    <p>Attention is O(n²) in that number. Doubling your resolution quadruples the dominant cost.
+    This is why the single most effective thing you can do on a slow box is generate smaller and upscale —
+    and why <a href="#optimizations">§08</a> ranks the optimizations the way it does.</p>
+
+    <h3>LoRA means something different too</h3>
+    <p>You've probably seen LoRA used to teach an LLM a domain or a format. Here the highest-value LoRAs
+    don't change <em>what</em> the model makes — they change <em>how many steps it needs</em>. A “turbo”
+    LoRA is a distilled student that reaches the same place in 4–8 steps instead of 20–50. There is no
+    real LLM equivalent; speculative decoding is the nearest cousin.</p>
+  </div>
+</section>
+
+<!-- ============ 4. THE HARDWARE TRUTH ============ -->
+<section id="roofline">
+  <div class="shead"><span class="snum">07</span><h2>Your box, measured — and the myth to discard</h2></div>
+  <p class="sdek">I benchmarked the machine rather than quoting the datasheet, because the datasheet is
+  where the wrong conclusion comes from.</p>
+  <div class="stack col">
+
+    <div class="scroller">
+      <table>
+        <caption>Run this session against <code>torch 2.10.0+cu130</code> on your GB10. <span class="chip c-m">Measured</span></caption>
+        <thead><tr><th>Quantity</th><th>Value</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td class="k">compute capability</td><td class="num hot">sm_121</td><td>Not sm_120. Matters for every source build.</td></tr>
+          <tr><td class="k">memory read bandwidth</td><td class="num">234 GiB/s</td><td>≈251 GB/s, i.e. 92% of the 273 GB/s spec <span class="chip c-s">Spec</span></td></tr>
+          <tr><td class="k">bf16 dense matmul</td><td class="num">100 TFLOP/s</td><td>12288³</td></tr>
+          <tr><td class="k">fp8 matmul</td><td class="num hot">195 TFLOP/s</td><td><strong>2× headroom.</strong> Blackwell fp8 tensor cores work.</td></tr>
+          <tr><td class="k">SDPA attention, S=16384</td><td class="num">89.6 / 93.7 TFLOP/s</td><td>flash / cuDNN — already 93% of the matmul roof</td></tr>
+          <tr><td class="k">attention, S=65536, 1 layer</td><td class="num bad">604 ms</td><td>O(n²) made visible</td></tr>
+          <tr><td class="k">largest single alloc</td><td class="num good">96 GiB</td><td>The GPU can address nearly all of it</td></tr>
+          <tr><td class="k">“CPU offload” cost</td><td class="num">55 GiB/s</td><td>pinned == pageable → it's a memcpy in one LPDDR pool, not a PCIe hop</td></tr>
+          <tr><td class="k">60 GiB resident</td><td class="num good">no penalty</td><td>No paging cliff</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box compute">
+      <div class="boxlabel">Correction — this reverses my own opening claim</div>
+      <p>Earlier in our session I told you bandwidth was your scarcest resource. <strong>That's true for
+      the Qwen models on this box and false for this one</strong>, and since it changes which
+      optimizations are worth your time, it's worth being exact about.</p>
+      <p>The roofline knee is <span class="fig">100 TFLOP/s ÷ 251 GB/s = <b>398 FLOP/byte</b></span>.
+      A workload above that line is compute-bound; below it, bandwidth-bound.</p>
+      <div class="bars" style="margin-top:6px">
+        <div class="bar"><span class="lab">Qwen decode, bs=1</span><span class="track"><span class="fill f-bw" style="width:0.4%"></span></span><span class="val">~1</span></div>
+        <div class="bar"><span class="lab">roofline knee</span><span class="track"><span class="fill f-mute" style="width:1.4%"></span></span><span class="val">398</span></div>
+        <div class="bar"><span class="lab">H3 step @960×540</span><span class="track"><span class="fill f-compute" style="width:100%"></span></span><span class="val">43,680</span></div>
+      </div>
+      <p style="margin-top:12px">The H3 denoise step sits <strong>110× past the knee</strong>. Its bandwidth
+      floor for 14 steps is <span class="fig">3.7 s</span>; the compute cost is <span class="fig">~624 s</span>.
+      Memory traffic is 0.6% of the problem. <strong>You are FLOPS-limited, not bandwidth-limited.</strong></p>
+    </div>
+
+    <p>Two independent published results agree, and they're the kind of evidence that's hard to argue with —
+    someone cut a video model's weights by 33% via NVFP4 on a Spark and generation got
+    <em>6% slower</em> (18.0 s → 19.1 s) <span class="chip c-p">Published</span>. A 33% reduction in bytes
+    producing no speedup is the diagnostic signature of a compute-bound kernel. Separately,
+    <code>torch.compile</code> was reported to give “essentially 0% speedup on GB10.”</p>
+
+    <h3>The model predicts the published numbers</h3>
+    <p>Worth doing because it means you can forecast a config before waiting 20 minutes for it. Using only
+    the two throughput figures measured above plus H3's real config:</p>
+
+    <div class="scroller">
+      <table>
+        <caption>Predicted from measured hardware limits. Compare: a published Spark run of the 960×540 / 15 s / 14-step job took <strong>741 s</strong> — my model says 624 s, within 16%.</caption>
+        <thead><tr><th>Shape</th><th>Tokens</th><th>Linear</th><th>Attention</th><th>Per step</th><th>× 14 steps</th></tr></thead>
+        <tbody>
+          <tr><td class="k">864×480, 3 s</td><td class="num">7,695</td><td class="num">2.4 s</td><td class="num">1.0 s</td><td class="num">3.3 s</td><td class="num good">47 s</td></tr>
+          <tr><td class="k">1344×768, 5.2 s</td><td class="num">32,256</td><td class="num">9.9 s</td><td class="num">17.0 s</td><td class="num">26.9 s</td><td class="num">377 s</td></tr>
+          <tr><td class="k">960×540, 15 s</td><td class="num">43,680</td><td class="num">13.5 s</td><td class="num hot">31.1 s</td><td class="num">44.6 s</td><td class="num">624 s</td></tr>
+          <tr><td class="k">1344×768, 15 s</td><td class="num">91,728</td><td class="num">28.3 s</td><td class="num bad">137.1 s</td><td class="num">165.4 s</td><td class="num bad">2,315 s</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p><strong>Attention is 70% of the compute</strong> at the middle shape and 83% at the largest.
+    That single fact is why SageAttention and Sol-Attn are the interventions that matter, and why
+    quantizing weights is not.</p>
+
+    <div class="box bw">
+      <div class="boxlabel">Practical gotchas specific to this box</div>
+      <ul>
+        <li><code>nvidia-smi</code> reports memory as <strong>“Not Supported” / N/A</strong> on GB10 <span class="chip c-m">Measured</span>. Every “watch nvidia-smi for VRAM” instruction you'll read is inapplicable. Use <code>free -g</code> for capacity and <code>nvidia-smi dmon</code> for sm% / power / temp.</li>
+        <li>Your system <code>python3</code> has <code>torch 2.10.0+cpu</code> — <code>cuda.is_available() == False</code>. Plain <code>pip install torch</code> on aarch64 silently resolves to a CPU wheel. Always <code>--index-url https://download.pytorch.org/whl/cu130</code>; cp312 aarch64 wheels exist through 2.13.0 <span class="chip c-m">Measured</span>.</li>
+        <li>Run headless. Xorg + gnome-shell are holding 873 MiB of unified memory you'll want.</li>
+        <li>Swap is only 16 GiB; the vLLM path has been observed using 12.6 GiB of it.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 5. OPTIMIZATION LADDER ============ -->
+<section id="optimizations">
+  <div class="shead"><span class="snum">08</span><h2>The optimization ladder</h2></div>
+  <p class="sdek">Ranked by measured payoff on this hardware, not by how often they're mentioned online.
+  The ranking is a direct consequence of <a href="#roofline">§07</a>: things that cut FLOPs win, things that cut bytes don't.</p>
+  <div class="stack">
+
+    <div class="rung">
+      <span class="rank">1</span>
+      <div class="body">
+        <h3>Cross-step caching <span class="tag">biggest single lever</span></h3>
+        <p class="payoff">710.6 s → 181.3 s &nbsp;·&nbsp; <strong>3.92×</strong> at 480p/50 steps <span class="chip c-p">Published</span></p>
+        <p>Adjacent denoising steps produce very similar hidden states, so you can skip recomputing
+        transformer blocks and reuse a stale residual. TeaCache tracks the L1 distance between
+        consecutive modulated inputs against a threshold (<code>rel_l1_thresh</code> 0.1–0.2);
+        variants are EasyCache, FBCache, Cache-DiT, and H3FirstBlockCache.</p>
+        <p>NVIDIA's own Sol Engine measurements attribute the largest jump to this, and critically
+        it needs <strong>no distillation, no LoRA, no calibration pass</strong>. It's approximate —
+        unlike an LLM's KV cache, which is exact — so quality degrades if you push the threshold.</p>
+      </div>
+    </div>
+
+    <div class="rung">
+      <span class="rank">2</span>
+      <div class="body">
+        <h3>Turbo LoRA — step distillation <span class="tag">what you asked about</span></h3>
+        <p class="payoff">20–30 steps → 4–8 &nbsp;·&nbsp; <strong>3–5×</strong>, linear in step count</p>
+        <p>Your link <code>larryvrh/MiniMax-H3-Turbo-Lora</code> is real: 606k downloads, Apache-2.0,
+        rank 64 on attention/MLP and rank 16 on <code>adaln_proj</code>, 779.8 MB per file. The technique
+        is <strong>DMD2</strong> — adversarial distribution-matching distillation — confirmed by the author
+        himself, not LCM and not CFG distillation.</p>
+        <p><strong>An important correction to the usual framing:</strong> most turbo-LoRA writeups claim
+        6–10× because they assume you also drop CFG. H3 is <em>already</em> CFG-distilled, so there's no
+        2× to reclaim. The honest number is the step ratio alone, 3–5×.</p>
+        <p>Settings that work: strength 1.0, <code>euler</code> + <code>simple</code>, shift 6/3 at 768p.
+        Note the off-by-one — <code>num_inference_steps</code> counts sigma grid points including the
+        terminal zero, so an “8-step” adapter is requested as <strong>9</strong> and a “4-step” as
+        <strong>5</strong>. Quality cost is real: motion smear on fast motion at 4 steps, which the author
+        acknowledges as unsolved. 6–8 is the sweet spot.</p>
+        <p>Alternatives worth knowing: <code>lightx2v/Minimax-h3-Turbo</code> (529k downloads, also DMD,
+        from ModelTC) and <code>Minimax-h3-Turbo-SLA</code>, which bundles 85% attention sparsity into
+        the same adapter.</p>
+      </div>
+    </div>
+
+    <div class="rung">
+      <span class="rank">3</span>
+      <div class="body">
+        <h3>Generate small, upscale after</h3>
+        <p class="payoff">6.03× &nbsp;·&nbsp; 875 s → 145 s <span class="chip c-p">Published</span></p>
+        <p>Falls directly out of the O(n²) math in <a href="#dit">§05</a>. Rendering at 640×360 and upscaling 2× to 720p
+        beat direct 720p by 6× in one published Spark benchmark. Unglamorous and the largest single win
+        available to you. Choice of upscaler matters too — swapping Real-ESRGAN for SPAN cut another
+        282 s (22%) off a run. NVIDIA VSR is permanently unavailable on Spark, so don't plan around it.</p>
+      </div>
+    </div>
+
+    <div class="rung">
+      <span class="rank">4</span>
+      <div class="body">
+        <h3>Sol-Attn — sparse attention <span class="tag">not what the name suggests</span></h3>
+        <p class="payoff">1.57× on its own <span class="chip c-p">Published</span></p>
+        <p>Your NVIDIA forum link advertises “SOL attn acceleration,” and it's worth clearing up what that
+        is: <strong>not</strong> speed-of-light, <strong>not</strong> a SageAttention rebrand.
+        Sol-Attn = <em>Sparsifying Online attention</em>, a training-free dynamic sparse-attention method
+        from NVlabs (arXiv 2607.24027, July 2026), shipped on the <code>sol-engine</code> branch of
+        NVlabs/Sana and packaged as ComfyUI nodes.</p>
+        <p>It attacks the 70–83% of your runtime that is attention by not computing all of it.
+        On GB10 specifically the <code>flex_attention</code> path is <em>numerically wrong</em>
+        (cos ≈ 0.92 vs SDPA) and the sm_121 patch forces the <code>triton_ref</code> kernel
+        (cos ≈ 0.99998) — a detail that would be very hard to debug on your own.</p>
+      </div>
+    </div>
+
+    <div class="rung">
+      <span class="rank">5</span>
+      <div class="body">
+        <h3>SageAttention — quantized attention <span class="tag">what you asked about</span></h3>
+        <p class="payoff">1263.5 s → 1010 s &nbsp;·&nbsp; <strong>1.20×</strong> end-to-end on H3/GB10, 1.32× on the sampling stage alone <span class="chip c-p">Published</span></p>
+        <p>It's <em>quantized</em> attention, not sparse: Q·Kᵀ in INT8 with outlier smoothing, P·V in FP8
+        e4m3 with a two-level FP16→FP32 accumulator. My measurements say exactly why it helps here and
+        by how much: your bf16 attention already runs at 93% of the matmul roof, so there is
+        <strong>no kernel-engineering headroom left</strong> — but fp8 measured 195 TFLOP/s against
+        bf16's 100. The ~2× precision headroom is the entire mechanism, and a 20% end-to-end gain is
+        what that converts to once non-attention work is included.</p>
+        <p><strong>Build reality on your box:</strong></p>
+        <ul>
+          <li>PyPI ships only <strong>1.0.6</strong> (the old Triton v1) <span class="chip c-m">Measured</span>. You must build 2.2.0 from GitHub source — there is no aarch64 wheel anywhere, and the usual prebuilt-wheel mirror is Windows-only.</li>
+          <li>sm_121 <em>is</em> supported upstream: <code>SUPPORTED_ARCHS</code> includes <code>"12.1"</code> and maps it to <code>compute_121a,code=sm_121a</code>. Build with <code>TORCH_CUDA_ARCH_LIST="12.1"</code>, ~10 min.</li>
+          <li>There is no dedicated sm_12x kernel — sm_121 compiles the <strong>Ada sm_89 sources</strong> retargeted. It works, but that's what you're running.</li>
+          <li>Needs <code>TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas</code> and generally <code>TORCHDYNAMO_DISABLE=1</code>, because Triton's bundled ptxas can't do sm_121a.</li>
+          <li><span class="bad">SageAttention 3 is broken on GB10</span> — mosaic artifacts, TMA descriptor failures, and no faster than 2.2. Ignore anything advertising SA3 on sm_121a.</li>
+          <li><span class="bad">Open correctness bugs specifically with H3</span>: the fp8 PV kernel silently emits pure noise above ~160k packed tokens. Your realistic shapes (~92k max) sit below that, but know the cliff exists.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="rung dim">
+      <span class="rank">6</span>
+      <div class="body">
+        <h3>Quantization <span class="tag">capacity, not speed</span></h3>
+        <p class="payoff">~0× speed &nbsp;·&nbsp; but it's the reason the model fits at all</p>
+        <p>This is where LLM instincts hurt most. On your Qwen models, NVFP4 is a genuine 1.5× — measured
+        Qwen3-8B goes 25.65 → 38.6 tok/s, because decode is bandwidth-bound. On H3, NVFP4 cut weights 33%
+        for <em>−6% speed</em>. Weight-only formats unpack to bf16 before the matmul, so the FLOPs are
+        identical and the FLOPs are what you're short of.</p>
+        <p>Quantize anyway — you have no choice, since bf16 is 123.8 GiB against 121.7 GiB of RAM.
+        Just book it as “makes it fit and loads faster,” not “makes it fast.”</p>
+        <p><strong>One exception, and it's the one to take:</strong> fp8 is not weight-only on this box.
+        Measured <span class="chip c-m">Measured</span> <code>_scaled_mm</code> runs at 192.2 TFLOP/s
+        against bf16's 92.8 — a genuine <strong>2.07×</strong> on the compute you're actually short of.
+        INT8 goes the other way at <strong>0.63×</strong>. So the format choice is not
+        “which is smallest” but “which has native tensor cores here,” and the answer is fp8.
+        See <a href="#config">§04</a>.</p>
+      </div>
+    </div>
+
+    <div class="rung dim">
+      <span class="rank">7</span>
+      <div class="body">
+        <h3>Things not to bother with</h3>
+        <p class="payoff">zero or negative</p>
+        <ul>
+          <li><strong>CPU offload / <code>--lowvram</code>.</strong> Every guide written for a 24 GB 4090 recommends it. Here host RAM <em>is</em> VRAM, so it buys zero capacity and costs a 55 GiB/s memcpy <span class="chip c-m">Measured</span>. vLLM's own GB10 notes call DLO “actively harmful” — OOM-killed with exit −9.</li>
+          <li><strong><code>torch.compile</code>.</strong> Reported ~0% on GB10. The 3× someone did get came from PTX→SASS kernel caching, which is a first-run cost, not compilation.</li>
+          <li><strong>FlashAttention 2/3/4.</strong> No sm_121 kernels. FA2 builds but matches or loses to SDPA; FA3 is Hopper-only; FA4 needs tcgen05/TMEM that sm_121 lacks. <code>flash-attn</code> is sdist-only on PyPI anyway <span class="chip c-m">Measured</span> — no wheels for any platform.</li>
+          <li><strong>Pinned memory.</strong> Measured identical to pageable <span class="chip c-m">Measured</span>. It's a coherent pool; there's no DMA to optimize.</li>
+          <li><strong>A second Spark.</strong> ConnectX at 200 Gb ≈ 24.5 GB/s is ~1/10 of one Spark's own memory bandwidth. Not the first move.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 6. COMFYUI ============ -->
+<section id="comfyui">
+  <div class="shead"><span class="snum">09</span><h2>What ComfyUI is, and why this world uses it</h2></div>
+  <p class="sdek">You asked what it is and how it relates to the model. The short version: it is not a
+  server for a model, and that's exactly the point.</p>
+  <div class="stack col">
+    <p>ComfyUI is a <strong>DAG interpreter</strong> whose node outputs are live PyTorch objects —
+    <code>MODEL</code>, <code>CLIP</code>, <code>VAE</code>, <code>CONDITIONING</code>,
+    <code>LATENT</code>, <code>IMAGE</code>. A “workflow” is JSON of the form
+    <code>{node_id: {class_type, inputs}}</code>, where an input is either a literal or a
+    <code>[source_node, output_slot]</code> edge. The backend topologically sorts it, caches per-node
+    results, and executes.</p>
+
+    <div class="box">
+      <div class="boxlabel">The thing that surprises people coming from vLLM</div>
+      <p><strong>The denoising loop is not in the graph.</strong> Loaders produce objects, text encoders
+      produce conditioning, and then a <em>single</em> <code>KSampler</code> node runs all N steps
+      internally and emits one latent. <code>VAEDecode</code> turns that into pixels.</p>
+      <p>So the graph is pipeline <em>assembly</em> — the part vLLM hardcodes — not the inner loop.
+      That's the whole design thesis.</p>
+    </div>
+
+    <h3>Why a graph instead of an endpoint</h3>
+    <p>Image and video generation has no stable request schema. Every result is a different composition:
+    LoRA stacks, ControlNet, IP-Adapter, multi-stage sampling, latent upscale, refiner passes, frame
+    interpolation, per-node device placement. A stateless <code>/v1/videos</code> endpoint would need a
+    new parameter for every one of those. A graph makes composition <em>be</em> the interface.</p>
+    <p>ComfyUI is also aggressively <em>stateful</em> about weights — models persist across requests and
+    stay partially resident — which is precisely what a stateless server is designed to avoid. On a
+    5-model pipeline where the text encoder alone is 62 GiB, that statefulness is the difference between
+    a 9-minute cold start and an instant second run.</p>
+
+    <h3>How it relates to H3 specifically</h3>
+    <p>ComfyUI has official H3 support with documented workflows. Its model layout is
+    <code>models/diffusion_models</code>, <code>models/text_encoders</code>, <code>models/vae</code>,
+    <code>models/loras</code> — and note it usually wants <strong>repackaged single-file weights</strong>,
+    not the diffusers folder tree. That's why Comfy-Org publishes repacks, and why grabbing the right
+    subset is <strong>39.6 GiB</strong> rather than the 464 GiB a naive full clone would pull —
+    see <a href="#why-different">why the two stacks differ</a>.</p>
+    <p>It's also the only path where the whole <a href="#optimizations">§08</a> ladder composes: turbo LoRA + Sol-Attn + SageAttention
+    + FirstBlockCache stack as nodes in one graph. vLLM-Omni supports none of the LoRA half.</p>
+
+    <h3>Honest downsides</h3>
+    <ul>
+      <li><strong>Supply chain.</strong> Custom nodes are arbitrary Python from GitHub, auto-loaded at startup. Community H3 forks bundle up to 14 packs.</li>
+      <li><strong>Reproducibility.</strong> A workflow JSON pins node names, not node versions. Version drift silently changes output.</li>
+      <li><strong>pip can destroy your build.</strong> Installing <code>sageattention</code> or <code>onnxruntime</code> from PyPI will happily overwrite your locally compiled sm_121 wheel with one that doesn't work.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============ 7. THE LINKS ============ -->
+<section id="links">
+  <div class="shead"><span class="snum">10</span><h2>Your four links, assessed</h2></div>
+  <p class="sdek">All four are real and all four were fetched. They are not equally trustworthy.</p>
+  <div class="cards">
+
+    <div class="card">
+      <span class="rating r-read">Read the docs, skip the container</span>
+      <h3>joeynyc/MiniMax-H3-DGX-Spark</h3>
+      <p class="src">github.com/joeynyc/MiniMax-H3-DGX-Spark</p>
+      <p class="verdictline">44 files, Apache-2.0, 37 stars, 4 commits, last push 2026-08-04 (19 days stale).
+      Docker container over a digest-pinned <code>vllm/vllm-omni:minimax-h3</code> image.</p>
+      <p class="verdictline"><strong>Genuinely good engineering.</strong> The Python patch is ~93% upstream,
+      but 4 of its 5 substantive changes were later independently made upstream, and the 5th — rebinding
+      QuantFP8 to <code>forward_cuda</code> to dodge a Triton float8e4nv lowering failure on sm_121 — is
+      original and load-bearing. The harness (14 scripts, pytest, CI, provenance pinning) is unusually rigorous.</p>
+      <p class="verdictline"><strong>But:</strong> open issue #4 is a server-wedge — a 30 s async timeout
+      cancels a future, then the result pump calls <code>set_result()</code> on it, killing the only pump
+      thread. The server stays HTTP-200 healthy forever and never returns another video. Its own 50-step
+      run averaged 46 s per step, well above the 30 s trigger. Unanswered for 18 days.</p>
+      <p class="verdictline">Its measured numbers are the most credible in your link set: 89.2 GiB loaded,
+      519–543 s cold start, 111.4 s warm at 768×448.</p>
+    </div>
+
+    <div class="card">
+      <span class="rating r-read">Community, not NVIDIA</span>
+      <h3>NVIDIA forum “one-click deploy”</h3>
+      <p class="src">forums.developer.nvidia.com/t/…/379894</p>
+      <p class="verdictline">Posted 2026-08-12 by <code>alexlu0912</code>, trust level 1 —
+      <code>admin=false, moderator=false, staff=false</code>. It's a <strong>self-promotion post for the
+      author's own Gitee repo</strong>, hosted on NVIDIA's forum. 3 posts, 649 views.</p>
+      <p class="verdictline">“One-click” = a Python TUI that clones ComfyUI v0.30.1 + 5 node repos and
+      downloads ~165–171 GB from mixed HF/ModelScope sources. No Docker image, no NGC link, no benchmark
+      table in the post itself.</p>
+      <p class="verdictline"><strong>Numbers don't match its own repo.</strong> The post claims ~6 min for
+      5 s 720p; the repo's <code>BENCHMARK.md</code> from the same day measures direct 720p at
+      <strong>9 min 00 s</strong>. Only the 360p→2× upscale trick reaches 2 m 25 s.</p>
+      <p class="verdictline">Its real value is the Sol-Attn discovery and the sm_121 patch, both of which
+      come from the upstream <code>keys-heretic</code> project it vendors.</p>
+    </div>
+
+    <div class="card">
+      <span class="rating r-care">Useful reading, don't run the installer</span>
+      <h3>gitee dgxspark_comfyui_minimax_h3</h3>
+      <p class="src">gitee.com/alexlu0912_admin/dgxspark_comfyui_minimax_h3</p>
+      <p class="verdictline">Same author as the forum post. Exists, accessible, cloned successfully;
+      5 commits, MIT, GitHub mirror at <code>luqidaxia/…</code>. Docs + deploy scripts only, ~150 KB.
+      Bilingual EN/中文.</p>
+      <p class="verdictline"><strong>Its benchmark table is the most useful thing in your link set</strong>
+      (20 steps, 124 frames): 480p 285 s → 210 s with Sol Engine; 720p 875 s → 540 s; and 640×360 +
+      RealESRGAN 2× → 145 s, a 6.03× win. It also honestly self-reports that FirstBlockCache got
+      <em>zero</em> cache skips at threshold 0.08.</p>
+      <p class="verdictline"><strong>Defects found:</strong> the ComfyUI v0.30.1 pin is broken in the
+      wizard, the repo's own <code>workflows/</code> directory is never actually installed, docs say 12
+      workflows but it ships 13, and a <code>minnimax</code> double-n typo is load-bearing in every path.
+      Zero aarch64 source builds — it relies entirely on prebuilt wheels and installs
+      <code>sageattention==1.0.6</code>, i.e. the old v1.</p>
+    </div>
+
+    <div class="card">
+      <span class="rating r-use">Real and worth using</span>
+      <h3>larryvrh/MiniMax-H3-Turbo-Lora</h3>
+      <p class="src">huggingface.co/larryvrh/MiniMax-H3-Turbo-Lora</p>
+      <p class="verdictline">606,557 downloads, 845 likes, Apache-2.0, created 2026-08-05. DMD2 step
+      distillation. Rank 64 attn/MLP, rank 16 adaln, alpha == rank. Covered in detail in <a href="#optimizations">§08</a>.</p>
+      <p class="verdictline"><strong>Supply-chain warning:</strong> alongside the safetensors it ships
+      10 undocumented <code>experimental_*.bin</code> checkpoints totalling 10.17 GiB. Those are torch
+      pickles — <strong>arbitrary code execution on load</strong>. Download the
+      <code>.safetensors</code> files specifically; don't <code>snapshot_download</code> the repo.</p>
+      <p class="verdictline">Also: the README lists a <code>v4_step150_ema</code> file that isn't in the
+      actual listing, and keys lack the <code>diffusion_model.</code> prefix so stock
+      <code>LoraLoaderModelOnly</code> won't load it without a one-line key conversion.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 8. WHAT TO EXPECT ============ -->
+<section id="expect">
+  <div class="shead"><span class="snum">11</span><h2>What to actually expect</h2></div>
+  <div class="stack col">
+    <div class="scroller">
+      <table>
+        <caption>Real reported DGX Spark video-generation timings, for calibration. <span class="chip c-p">Published</span></caption>
+        <thead><tr><th>Job</th><th>Config</th><th>Time</th></tr></thead>
+        <tbody>
+          <tr><td class="k">H3, 480p, 124f, 50 steps</td><td>bf16 baseline (NVIDIA Sol Engine page)</td><td class="num">710.6 s</td></tr>
+          <tr><td class="k">H3, same</td><td>+ kernel opt + Sol-Attn + cross-step cache</td><td class="num good">181.3 s</td></tr>
+          <tr><td class="k">H3, 960×540, 15.08 s clip</td><td>NVFP4 + SageAttention 2.2, 14 steps</td><td class="num">741 s</td></tr>
+          <tr><td class="k">H3, same clip</td><td>on an RTX 5090, for comparison</td><td class="num">314 s <span class="bad">(Spark is 2.4× slower)</span></td></tr>
+          <tr><td class="k">H3, 5 s, 0.2 MP</td><td>t2v / i2v / r2v</td><td class="num">143 / 174 / 215 s</td></tr>
+          <tr><td class="k">H3 FL2VA, 768×448</td><td>vLLM-Omni, online FP8, warm</td><td class="num">111.4 s</td></tr>
+          <tr><td class="k">Wan 2.2, 640×640, 81f</td><td>fp16</td><td class="num">557 s cold / 370 s warm</td></tr>
+          <tr><td class="k">HunyuanVideo 1.5</td><td>fp16</td><td class="num bad">3,606 s</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="box compute">
+      <div class="boxlabel">Sensible starting settings</div>
+      <p>Community consensus for Spark, which is deliberately far from H3's native defaults:
+      <strong>864×480 or 960×540, 14–20 steps, <code>res_multistep</code> + <code>simple</code></strong> —
+      not the model's native 1344×768 at 50 steps. Start at 3–5 seconds. Expect your first successful
+      generation to take an afternoon of setup and roughly 2–10 minutes of compute.</p>
+      <p>Download logistics: measured <strong>71.9 MB/s</strong> to Hugging Face from this box
+      <span class="chip c-m">Measured</span>. That's ~9 min for the ComfyUI set, ~32 min for the vLLM set,
+      and ~1.8 h if you naively clone all 464 GiB. You have 2.6 TB free, so disk isn't a constraint —
+      it would be on the 1 TB Spark.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 9. OPEN ============ -->
+<section id="open">
+  <div class="shead"><span class="snum">12</span><h2>What I could not settle</h2></div>
+  <p class="sdek">Stated plainly rather than papered over, because each one is cheap to resolve
+  empirically and expensive to guess wrong.</p>
+  <div class="stack col">
+    <ul>
+      <li><strong>No one has published a MiniMax-H3 wall-clock for the vLLM path at a full-size shape on Spark.</strong> vLLM's own GB10 section declines to give one, saying only that it is “far higher” than the multi-GPU profiles. My <a href="#roofline">§07</a> model predicts it; nobody has measured it.</li>
+      <li><strong>Step count still matters more than clip length for audio.</strong> No controlled duration-only A/B exists. Official open-weight samples at 8.00 s and 10.13 s have valid 32 kHz stereo audio. Community 5.17 s vs 10.13 s pairs at 1280×768 had matching −14 dB RMS, no NaNs, no clipping, and no ≥0.4 s silences. The remaining risk is 4-step Turbo plus old samplers, not “15 seconds is unusable.” Use 8 steps for dialogue; treat 15.08 s as an A/B, not the default.</li>
+      <li><strong>Pruned vs unpruned, and int8 vs fp8 vs bf16 quality — all unmeasured.</strong> No PSNR/SSIM comparison across any of the five <code>fl2va</code> variants exists on any hardware. <a href="#pruning">§03</a> establishes what the pruning does mechanically and argues the error lands on the modulation path rather than the content path — but that is an argument, not a measurement.</li>
+      <li><strong>Whether <code>int8_convrot</code> actually works on sm_121 in ComfyUI.</strong> Comfy-Org recommends it for cu130 users and one practitioner reports using it on a Spark, but I found no first-hand success log with timings.</li>
+      <li><strong>SageAttention 2.2.0 is built but not runtime-tested on this box.</strong> Version 1.0.6 was measured here: 1.09× at S=16,384 and 1.14× at S=46,410, cosine similarity &gt; 0.9999 versus SDPA. A 2.2.0 ARM64 wheel then built for <code>sm_121a</code> and was not installed before the session ended.</li>
+      <li><strong>Whether the AdaLN cache can be used in the vLLM path.</strong> SGLang has <code>--minimax-h3-adaln-cache-path</code>; that's the difference between loading 33 B and 20 B, and would materially relieve vLLM's memory pressure. No vLLM equivalent flag found.</li>
+      <li><strong>Thermals over a sustained 40-minute run are undocumented.</strong> One report of ~67.9 W max seems implausibly low for a saturated GB10 and may be a misread.</li>
+    </ul>
+    <div class="box">
+      <div class="boxlabel">Method</div>
+      <p>16 research agents, 640 tool calls, all four of your links fetched directly plus primary sources
+      (HF API, raw config JSON, GitHub API, the LICENSE file, NVIDIA spec pages). Four load-bearing claims
+      then went through an adversarial pass instructed to refute them: one was <strong>refuted</strong>
+      (the original “vLLM cannot do this” claim in §01), two came back <strong>partially correct</strong> (the bandwidth claim in <a href="#roofline">§07</a>
+      and the SageAttention claim in <a href="#optimizations">§08</a>), one was <strong>confirmed</strong> (the architecture in §02).
+      A later pass corrected the FL2VA text-to-video claim, the 10.83 s typo, and the duration-only audio claim.
+      Hardware figures are local GB10 benchmarks, not datasheet values.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ DECISIONS ============ -->
+<section id="decisions">
+  <div class="shead"><span class="snum">13</span><h2>Decisions on record</h2></div>
+  <p class="sdek">What has been chosen, why, what was rejected, and specifically what evidence would
+  reverse it. Provisional entries are decisions taken to unblock work, not conclusions.</p>
+  <div class="stack">
+
+    <div class="adr">
+      <header><span class="id">D-01</span><h3>ComfyUI, not vLLM-Omni, for the first deployment</h3>
+        <span class="status s-adopt">adopted</span></header>
+      <div class="inner">
+        <dl class="rec">
+          <dt>Why</dt><dd>4× smaller download, <strong>41 GiB resident vs 105 GiB</strong>, supports the turbo LoRA and the whole optimization ladder, and leaves ~49 GiB to experiment in.</dd>
+          <dt>Rejected</dt><dd><strong>vLLM-Omni</strong> — vendor-marked <code>dgx_spark_gb10: verified</code> and gives an OpenAI-shaped API, but 7.8 GiB headroom, observed swap thrash, one DiT partition at a time, no LoRA support, and an unfixed wedge bug. FL2VA <em>does</em> serve text-to-video.</dd>
+          <dt>Reverses if</dt><dd>A production HTTP endpoint becomes the priority over experimentation — then vLLM-Omni, or ComfyUI behind a FastAPI shim.</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-02</span><h3>fp8 for the DiT, int8 for the text encoder</h3>
+        <span class="status s-prov">provisional</span></header>
+      <div class="inner">
+        <dl class="rec">
+          <dt>Why</dt><dd>fp8 measured <strong>2.07×</strong> bf16 on sm_121; INT8 measured <strong>0.63×</strong> — slower than bf16. In the denoising loop optimize throughput; the conditioner runs once, so optimize its quality instead.</dd>
+          <dt>Rejected</dt><dd><code>int8_convrot</code> for the DiT — the obvious “unpruned but smaller” pick, but dominated on both quality and speed. <code>nvfp4_awq</code> for the conditioner — 4-bit prompt adherence for 10.7 GiB we can spare.</dd>
+          <dt>Reverses if</dt><dd>ComfyUI's H3 path does not route through <code>_scaled_mm</code>. Test: same seed with and without <code>--fast fp8_matrix_mult</code>. If step time doesn't roughly halve, switch to <code>fl2va_pruned_bf16</code>.</dd>
+          <dt>Unverified</dt><dd>Pruned-vs-unpruned quality has never been measured by anyone, on any hardware.</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="adr" style="opacity:.62">
+      <header><span class="id">D-03</span><h3>Generate at 1312×736, upscale to 1080p</h3>
+        <span class="status" style="color:var(--stop);background:var(--stop-soft);border-color:var(--stop-line)">superseded by D-05</span></header>
+      <div class="inner">
+        <p style="font-size:.93rem;color:var(--ink-2);margin:0">Chosen on the reasoning “take the largest
+        canvas that upscales uniformly.” Two pieces of evidence killed it: native high-res sampling is
+        measurably <em>slower than generating small and upscaling</em>, and audio corruption at ~1 MP with
+        few steps is a documented failure mode. Kept on record because the reasoning was wrong in an
+        instructive way — it optimised the scale factor when the scale factor was not the constraint.</p>
+      </div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-04</span><h3>SPAN as the upscaler</h3>
+        <span class="status s-adopt">adopted</span></header>
+      <div class="inner">
+        <dl class="rec">
+          <dt>Why</dt><dd>Measured on Spark over 362 frames to 1080p: <strong>SPAN 49.2 s vs Real-ESRGAN 316.0 s — 6.4× faster</strong>. It is also a PSNR-oriented regression network rather than a GAN, so it hallucinates less per-frame detail and should <em>flicker less</em> on video, not more. And it is stock <code>spandrel</code> in ComfyUI — zero custom wheels, which matters enormously on aarch64. The model file is 4.3 MB.</dd>
+          <dt>Rejected</dt><dd><strong>Real-ESRGAN</strong> — 6.4× the cost, GAN-based so more temporal shimmer. <strong>NVIDIA VSR</strong> — permanently unavailable: <code>nvidia-vfx</code> is x86_64-only wheel-stubs, and NVIDIA staff stated on 2026-04-01 “There is currently no plan to add NVIDIA VFX support on Spark.” (It does the same 362 frames in 11.2 s on a 5090 — the single biggest structural gap versus x86.) <strong>SeedVR2</strong> — 6–20× more expensive again.</dd>
+          <dt>Upgrade path</dt><dd><strong>FlashVSR</strong> if per-frame flicker turns out to be visible — one-step streaming diffusion VSR with genuine cross-frame propagation, est. 150–250 s on Spark, and the 1038lab wrapper needs no custom CUDA kernels.</dd>
+          <dt>Free lever not yet taken</dt><dd><strong>RIFE</strong> frame interpolation: 24→48 fps at constant duration for an estimated 15–30 s, ~3% of the run. A/V-safe as long as duration is held fixed. Caveat: its ComfyUI node depends on <code>cupy</code>, an aarch64 pain point, with a taichi backend as fallback.</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-05</span><h3>Generate at 960×544, 2× SPAN to 1080p</h3>
+        <span class="status s-prov">provisional — replaces D-03</span></header>
+      <div class="inner">
+        <dl class="rec">
+          <dt>The inversion</dt><dd>Same author, same seed, 20 steps, ~5 s clip:
+          <strong>native 1344×768 = 637 s</strong> vs <strong>960×540 + 2× upscale = 349.9 s</strong>.
+          Upscaling is <strong>1.82× faster and produces a larger frame</strong>. Generating big is not a
+          quality option you pay for — it is strictly dominated. D-03 optimised the wrong variable.</dd>
+          <dt>Why 960×544</dt><dd>Exactly <strong>2.00×</strong> to 1920×1088 (crop 8 rows to 1080) — the
+          cleanest possible scale factor. 0.52 MP, which is the region where audio survives few-step
+          sampling. And it is the exact shape of the only measured Spark 1080p run: <strong>741 s for a
+          15.08 s clip with joint audio</strong>.</dd>
+          <dt>Rejected</dt><dd><strong>1312×736 / 1344×768</strong> — slower <em>and</em> in the audio-corruption zone. <strong>1024×576</strong> — fine alternative, 1.88× scale, ~8% more sampling cost.</dd>
+          <dt>Reverses if</dt><dd>Output is visibly soft after 2× upscaling → step up to 1216×672 (1.58×) and accept ~40% more sampling time. Flicker is visible → D-04's FlashVSR path.</dd>
+          <dt>Note</dt><dd>The published run states 960×540, but 540 is not a multiple of 32 — diffusers would reject it. Either the blog rounds or the ComfyUI path pads. <strong>960×544 is the legal neighbour</strong>; use that.</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-06</span><h3>Audio governs the step count, not video</h3>
+        <span class="status s-prov">provisional</span></header>
+      <div class="inner">
+        <dl class="rec">
+          <dt>Finding</dt><dd>The risk flagged as unmeasured at the start of this briefing is now
+          <strong>documented</strong>. Community reports: “at 1 MP resolution and 4 steps, the audio still
+          gets corrupted”; and duration-dependent — “5 seconds can usually work… try 10 seconds, or even
+          15… the audio is nearly always unusable.” ComfyUI's own docs describe turbo mode as “slightly
+          lower audio and motion quality.” The clearest careful report: 4-step audio is coherent but below
+          a 20-step generation; <strong>8 steps is cleaner</strong>.</dd>
+          <dt>Confound to know</dt><dd>Most severe pre-2026-08-07 “turbo destroys audio” reports were a
+          <strong>ComfyUI sampler bug</strong>, not the LoRA — H3 runs video and audio on two different
+          flow schedules, and stock single-clock Euler integrated them on one clock. Fixed 2026-08-06 in
+          commit <code>bdcb886a</code> (<code>ModelSamplingAV</code>). <strong>Use a ComfyUI newer than
+          that</strong> and discount every older report.</dd>
+          <dt>Decision</dt><dd><strong>8 steps, not 4</strong>, for anything with dialogue. 4 steps only
+          for silent clips or fast seed-hunting. Resolution and step count are the clearer audio risks.
+          Duration alone has <em>not</em> been isolated as a cause of unusable audio — see D-07.</dd>
+          <dt>Also</dt><dd>In a controlled 1 MP / 15 s / 4-step comparison of four turbo LoRAs, the
+          <strong>50-step baseline was still judged best overall</strong>. Turbo is a real quality
+          trade, not a free lunch.</dd>
+        </dl>
+      </div>
+    </div>
+
+
+    <div class="adr">
+      <header><span class="id">D-07</span><h3>Default clip length is 8.00 s, not 5.17 s or 15.08 s</h3>
+        <span class="status s-adopt">adopted</span></header>
+      <div class="inner">
+        <dl class="rec">
+          <dt>Why</dt><dd>8.00 s (192 frames) is a legal <code>17n+5</code> length, matches the official image-to-video sample, and is long enough to be useful. On the optimized path it is about <strong>5.3 minutes</strong> at 960×544 / 8 steps versus 8.2 minutes at 15.08 s. Duration was not isolated as an audio-quality cause, so there is no need to stay at 5.17 s once the pipeline works.</dd>
+          <dt>Rejected</dt><dd><strong>15.08 s as the default</strong> — inside the trained range, but ~55% slower and where most unusable-audio reports cluster. <strong>Native 1280×720 or 1344×768</strong> — slower than 960×544 plus SPAN, and nearer the ~1 MP few-step audio-corruption reports.</dd>
+          <dt>Smoke test</dt><dd>First run: <strong>5.17 s / 124 frames</strong> at the same 960×544 / 8-step recipe. Seed-hunting may drop to 4 steps only if the clip is silent.</dd>
+          <dt>Reverses if</dt><dd>A same-seed, same-step, same-resolution A/B on this box shows 8.00 s audio clearly worse than 5.17 s. Then drop the default to 5.17 s and stitch. If 2× SPAN looks soft, step generate-resolution to 1216×672, not native 720p.</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="box compute">
+      <div class="boxlabel">Wall-clock to 1080p, optimized path, warm model</div>
+      <p>Built on the empirically derived Spark rule
+      <code>sampling_s ≈ 5.1 × steps × megapixels × seconds_of_video</code> — which reproduces the one
+      measured run to <strong>0.0%</strong> — plus SPAN at 136 ms/frame and 123 s of load/encode/decode.
+      Assumes NVFP4 + SageAttention.</p>
+      <div class="scroller">
+        <table>
+          <caption>Total wall-clock including upscale to 1920×1080. <strong>Stock ComfyUI settings measured ~3.3× slower than this rule</strong> — these numbers require the optimizations.</caption>
+          <thead><tr><th>Generate at</th><th>Scale</th><th>5.2s</th><th>8.0s</th><th>15.1s</th></tr></thead>
+          <tbody>
+            <tr><td colspan="5" class="k" style="background:var(--surface-2)">4 steps — silent clips / seed-hunting only</td></tr>
+            <tr><td class="k hot">960×544</td><td class="num">2.00×</td><td class="num good">3.2m</td><td class="num">3.9m</td><td class="num">5.5m</td></tr>
+            <tr><td class="k">1216×672</td><td class="num">1.58×</td><td class="num">3.8m</td><td class="num">4.7m</td><td class="num">7.1m</td></tr>
+            <tr><td colspan="5" class="k" style="background:var(--surface-2)">8 steps — the default for anything with dialogue</td></tr>
+            <tr><td class="k hot">960×544</td><td class="num">2.00×</td><td class="num good">4.2m</td><td class="num good">5.3m</td><td class="num good">8.2m</td></tr>
+            <tr><td class="k">1024×576</td><td class="num">1.88×</td><td class="num">4.4m</td><td class="num">5.7m</td><td class="num">8.9m</td></tr>
+            <tr><td class="k">1216×672</td><td class="num">1.58×</td><td class="num">5.2m</td><td class="num">6.9m</td><td class="num">11.3m</td></tr>
+            <tr><td class="k">1312×736</td><td class="num">1.47×</td><td class="num">5.7m</td><td class="num">7.7m</td><td class="num">12.8m</td></tr>
+            <tr><td colspan="5" class="k" style="background:var(--surface-2)">20 steps — no turbo LoRA</td></tr>
+            <tr><td class="k">960×544</td><td class="num">2.00×</td><td class="num">6.9m</td><td class="num">9.6m</td><td class="num">16.3m</td></tr>
+            <tr><td class="k">1312×736</td><td class="num">1.47×</td><td class="num">10.8m</td><td class="num">15.6m</td><td class="num bad">27.6m</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The one stock-settings datapoint at this scale: <strong>1280×736, 15 s, 20 steps took 1 h 20 m</strong>
+      on a single Spark. The rule predicts 24 m for that shape. Treat the gap as the cost of not
+      configuring NVFP4 and SageAttention — and as a reminder that these figures are a floor, not a promise.</p>
+    </div>
+
+    <div class="scroller">
+      <table>
+        <caption>Legal canvases. Both dimensions must be multiples of 32 — a hard <code>ValueError</code>, derived architecturally as VAE 16× × patch 2. Note the 1,032,192 px figure is a <em>soft default</em>, not an enforced cap (see below).</caption>
+        <thead><tr><th>Canvas</th><th>Pixels</th><th>Ratio</th><th>vs 1080p</th><th>Upscale to 1920×1080</th></tr></thead>
+        <tbody>
+          <tr><td class="k">832×480 &nbsp;<span class="chip c-s">480p</span></td><td class="num">399,360</td><td class="num">1.733</td><td class="num">19%</td><td>2.31× / 2.25× anamorphic</td></tr>
+          <tr><td class="k">1024×576 <span class="chip c-s">576p</span></td><td class="num">589,824</td><td class="num">1.778</td><td class="num">28%</td><td>1.875× uniform — exact 16:9</td></tr>
+          <tr><td class="k">1248×704 <span class="chip c-s">704p</span></td><td class="num">878,592</td><td class="num">1.773</td><td class="num">42%</td><td>1.54× / 1.53× uniform</td></tr>
+          <tr><td class="k">960×544 <span class="chip c-m">544p — chosen</span></td><td class="num">522,240</td><td class="num">1.765</td><td class="num">25%</td><td class="good">2.00× / 1.99× — crop 8 rows</td></tr>
+          <tr><td class="k">1312×736 <span class="chip c-s">736p — superseded</span></td><td class="num">965,632</td><td class="num">1.783</td><td class="num">47%</td><td class="good">1.46× / 1.47× uniform</td></tr>
+          <tr><td class="k">1344×768 <span class="chip c-s">768p, max</span></td><td class="num">1,032,192</td><td class="num">1.750</td><td class="num">50%</td><td>1.43× / 1.41× — 1.4% stretch</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box bw">
+      <div class="boxlabel">Also fixed by the model, not by choice</div>
+      <p>Frame counts snap to <code>17n+5</code> at 24 fps, so the legal durations are
+      <strong>4.46 s · 5.17 s · 8.00 s · 10.13 s · 15.08 s</strong>. Ask for 10 s and you get 10.125 s.
+      Plan edits around these, not around round numbers.</p>
+    </div>
+
+    <div class="box stop">
+      <div class="boxlabel">Correction — why 1080p is unreachable is not what this briefing first said</div>
+      <p>An earlier revision said <code>canvas_max_pixels = 1032192</code> blocks 1080p. Reading the
+      diffusers source disproves that: <code>canvas_max_pixels</code> is consumed <strong>only</strong>
+      inside <code>resolve_canvas_size</code>, which runs only when height and width are omitted. Grep the
+      whole module and no code path ever compares <code>height × width</code> against it. It is a soft
+      default for deriving a canvas from an aspect ratio — <strong>pass explicit dimensions and it is
+      bypassed entirely</strong>.</p>
+      <p>What actually makes 1920×1080 a hard error is the granularity rule: <strong>1080 ÷ 32 = 33.75</strong>.
+      1920×<strong>1088</strong> would pass every check diffusers performs and simply run. The real
+      barriers to native 1080p are that H3-Base is trained at a 768 px short edge — a user at 1376×768
+      (2.4% over the nominal cap) reported “distorted faces and heavy artifacts” — and that
+      <code>H3-Regenerate-2K</code> is hosted-API-only, stated verbatim in MiniMax's README as
+      “not yet open-sourced.”</p>
+      <p>The practical conclusion is unchanged, and D-05 now rests on a stronger reason anyway:
+      generating small and upscaling is <em>faster</em>, so the ceiling never binds.</p>
+    </div>
+
+    <div class="box bw">
+      <div class="boxlabel">Two corrections to earlier guidance in this briefing</div>
+      <ul>
+        <li><strong>Shift does not track resolution.</strong> I speculated it might need to be 6/3 at
+        high res. It doesn't — <code>shift</code> tracks <em>distillation</em>. LightX2V's non-distilled
+        base config at 1344×768/362 frames uses 12.0, identical to its 544p base configs, while its 544p
+        DMD 4-step config uses 6.0. Use 6/3 with the turbo LoRA at any resolution; 12/3 without one.</li>
+        <li><strong>The 768p turbo adapter is not the high-res answer.</strong> A discussion thread
+        titled “768p way worse than 544p” reports the 768p v1.0 giving oversaturation, bad audio and poor
+        prompt adherence; several users find the 544p-trained v0.1 better even above 1 MP. A
+        <strong>v1.1 768p adapter released 2026-08-20</strong> is widely reported better than v1.0 and is
+        missing from the vendor's own spec table — that is the one to try, at LoRA strength 1.2–1.3 near
+        1 MP rather than 1.0.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<p class="foot">Revision 2 · 2026-08-23. Research briefing for a DGX Spark — GB10, sm_121, aarch64,
+121.7 GiB unified, driver 580.159.03, CUDA 13.0, DGX OS 7.2.3. No model weights are hosted in this repository.</p>
+
+</div>
+
+</body>
+</html>

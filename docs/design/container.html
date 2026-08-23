@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Skeleton: Docker contract for MiniMax H3 on DGX Spark. Not implemented.">
+<title>Container (skeleton) — MiniMax H3 on DGX Spark</title>
+<link rel="stylesheet" href="../assets/site.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+</head>
+<body>
+
+<nav class="site-nav" aria-label="Site">
+  <div class="nav-inner">
+    <a class="brand" href="../index.html">H3 on Spark</a>
+    <div class="nav-links">
+      <a href="../briefing.html">Research</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="decisions.html">Decisions</a>
+      <a href="container.html" class="active">Container</a>
+    </div>
+  </div>
+</nav>
+
+<header class="top">
+  <div class="wrap">
+    <div class="eyebrow">
+      <span>Design</span><span>Skeleton</span><span>No Dockerfile yet</span>
+    </div>
+    <h1>Container contract</h1>
+    <p class="standfirst">
+      Placeholder for the Spark image other GB10 users should be able to run.
+      Open questions still block a Dockerfile.
+    </p>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="stack col">
+    <div class="box">
+      <div class="boxlabel">This page is a skeleton</div>
+      <p>Runtime diagram, mount table, and entrypoint rules land here after the container decisions are made and a host smoke test exists. Working notes: <a href="https://github.com/XiaohuiChen-personal/minimax-h3-dgx-spark/blob/main/design/container.md">design/container.md</a>.</p>
+    </div>
+    <div class="box bw">
+      <div class="boxlabel">Still to decide</div>
+      <ul>
+        <li>Base image (NGC / Spark PyTorch vs community ComfyUI ARM)</li>
+        <li>How weights are mounted and downloaded (never baked into layers)</li>
+        <li>ComfyUI version pin (must include <code>ModelSamplingAV</code>)</li>
+        <li>Default workflow, acceleration set, UI-only vs HTTP shim</li>
+        <li>License / excluded-territory acknowledgement before start</li>
+      </ul>
+    </div>
+  </div>
+  <p class="foot">Sibling pages: <a href="architecture.html">Architecture</a> · <a href="decisions.html">Decisions</a></p>
+</div>
+</body>
+</html>

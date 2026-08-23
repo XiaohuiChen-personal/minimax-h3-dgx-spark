@@ -6,13 +6,26 @@
 *.pth
 *.pt
 *.onnx
+*.whl
 *.mp4
 *.wav
+
 models/
 checkpoints/
+output/
+outputs/
+input/
+temp/
+user/
+ComfyUI/
+
 .venv/
 venv/
 __pycache__/
 .DS_Store
 .cursor/
 *.swp
+
+# Local container / build leftovers
+*.tar
+.docker/
