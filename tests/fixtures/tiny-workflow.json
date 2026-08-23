@@ -1,0 +1,33 @@
+{
+  "1": {
+    "class_type": "MiniMaxH3ImageToVideo",
+    "inputs": {
+      "prompt": "LOCKED_PLACEHOLDER",
+      "width": 960,
+      "height": 544,
+      "length": 124,
+      "steps": 8,
+      "first_frame": "",
+      "last_frame": ""
+    }
+  },
+  "2": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": 0,
+      "steps": 8
+    }
+  },
+  "3": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "filename_prefix": "LOCKED_PLACEHOLDER"
+    }
+  },
+  "4": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "LOCKED_PLACEHOLDER"
+    }
+  }
+}
