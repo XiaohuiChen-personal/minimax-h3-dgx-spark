@@ -20,6 +20,10 @@ Public repo: `XiaohuiChen-personal/minimax-h3-dgx-spark`. Pages: https://xiaohui
 
 **Status:** ComfyUI image (`h3-spark:local`) and locked graphs exist. Generate via `scripts/submit-prompt.sh` and poll `/history/<id>`. Do not invent a new process.
 
+If the user only asked to **make a video**, follow **Generate a video** below. Do not re-run the implementation plan.
+
+If a user is in an **excluded territory** (EU, UK, Republic of Korea, United States), tell them to request MiniMax approval at [platform.minimax.io/h3-license](https://platform.minimax.io/h3-license) before download or generate. Users **outside** those territories do not use that application path. Do **not** add `H3_LICENSE_ACK` or refuse a generate on this box because of a missing env flag (D-13).
+
 ## Hardware and Python traps
 
 - Box: NVIDIA GB10 (`sm_121`), `linux/arm64`, ~121.7 GiB unified memory, CUDA 13, DGX OS.
@@ -54,17 +58,73 @@ EasyCache · SageAttention **3** · blind `--use-sage-attention` · Sol-Attn `fl
 
 If Sage or Sol-Attn fail to import, the server may start, but smoke tests must say so. Do not hide the fallback.
 
-## Generate contract (after the image exists)
+## Generate a video (SSH + agent)
 
-Locked in the graph: D-02 files, 960×544, 8 steps, SPAN 2×, Sage 2.2, Sol-Attn `triton_ref`, FBC `H3 Safe`, a legal duration.
+You are on this Spark, in this repo. ComfyUI should already be up on **8188**. The agent fills a **locked** graph. It does not open a new process, edit the canvas, or invent nodes.
 
-Agent may change only: **prompt**, **seed**, **filename**, optional **first/last-frame image files**.
+Longer product card: `design/operator.md`.
 
-- Call `scripts/submit-prompt.sh` (or `POST /prompt` + poll `/history/<id>`). Jobs take **minutes**.
-- Do not start, restart, or kill ComfyUI for a normal generate.
-- Keyframes: attach files (`~/h3-data` → `/data` in the graph). `MiniMaxH3ImageToVideo` shows them to Qwen3-VL **and** `vae.encode`s them as frozen `minimax_keyframes`. `<Picture N>` prompt-only is empty theater. Do not switch to Ref2VA for a normal generate.
-- Print host paths under `~/h3-output`, not `/opt/ComfyUI/output/…`.
-- History outputs are `images` / `gifs` / `videos` lists of `{filename, subfolder, type}`.
+### 1. Confirm the server
+
+```bash
+curl -fsS http://127.0.0.1:8188/system_stats
+```
+
+If that fails: tell the user ComfyUI is down. Do **not** `docker compose up`, restart, or kill the container unless they explicitly asked you to start it.
+
+One GPU job at a time. A second submit **queues**. That is fine. Do not start a second ComfyUI.
+
+### 2. Pick a locked workflow
+
+| User ask | File | Length |
+|---|---|---|
+| Default / “about 8 seconds” | `workflows/h3-fl2va-default-8s.json` | **8.00 s / 192** |
+| Fast smoke | `workflows/h3-fl2va-smoke-5s17.json` | **5.17 s / 124** |
+
+Do not add a third graph. If they say “10 seconds,” snap to **10.13 s** or refuse. Never invent **10.00 s**. There is no locked 10.13 s JSON in this repo — refuse or ask them to accept 8.00 s.
+
+### 3. Inputs you may set
+
+H3 is **CFG-distilled**. There is **one** text field (`prompt`). There is **no** negative prompt and **no** `guidance_scale`. Do not add a second text box, a `negative_prompt` node, or CFG. Put “avoid X” in the same sentence if the user cares.
+
+| CLI | Graph field | Required | What to put |
+|---|---|---|---|
+| `--prompt` | `prompt` (also patches `text` if present) | yes | **One** English (or mixed) string. This is joint **video + stereo audio**. Describe what is on screen **and** what is heard. If they want speech, write that someone is speaking and, when they gave lines, quote the lines. A silent scene (e.g. “quiet kitchen”) yields room tone, not dialogue. |
+| `--seed` | `noise_seed` / `seed` | yes | Integer. Reuse the user’s seed; otherwise pick one and tell them. |
+| `--name` | `filename_prefix` | yes | Short token, no `/`. Example: `kitchen-talk`. |
+| `--first-frame` / `--last-frame` | `first_frame` / `last_frame` | no | **Not usable on the two locked T2V graphs today.** Those JSONs omit the keys so `--first-frame` **fail-closes**. Do not add empty IMAGE keys. Do not write `<Picture N>` in the prompt (empty theater). Do not switch to Ref2VA. If they need image-to-video, say the locked T2V path cannot take stills yet. |
+
+Locked (do not change): D-02 checkpoints, **960×544**, **8 steps**, Euler+simple, shifts **6 / 3**, Sage 2.2, Sol-Attn `triton_ref`, FBC `H3 Safe`, SPAN 2× → crop 1920×1080, 24 fps + 32 kHz stereo.
+
+### 4. Command
+
+From the **repository root**. Do not `cd` into `deploy/`.
+
+```bash
+./scripts/submit-prompt.sh workflows/h3-fl2va-default-8s.json \
+  --prompt "A person facing the camera and speaking clearly. She says: 'Good morning.' Natural room light. Stereo room tone and intelligible speech." \
+  --seed 42 \
+  --name kitchen-talk
+```
+
+The script `POST`s `/prompt` and polls `/history/<id>` (2 s, timeout 3600 s). Jobs take **minutes** (warm 5.17 s was ~3 min; warm 8.00 s was ~5 min on this box). Wait. Do not assume one chat turn is enough.
+
+### 5. Output
+
+On success the script prints:
+
+```text
+OUTPUT /home/<user>/h3-output/<name>_00001_.mp4
+```
+
+- Tell the user that **host** path. SaveVideo adds `_00001_`. There is no unsuffixed `<name>.mp4`.
+- Never print `/opt/ComfyUI/output/…`.
+- History lists are `images` / `gifs` / `videos` of `{filename, subfolder, type}` (this stack often puts the mp4 under `images`).
+- Do not commit or push the mp4.
+
+### Generate contract (same rules)
+
+Agent may change only: **prompt**, **seed**, **filename**, optional **first/last-frame files** (rejected on today’s T2V graphs). Call `scripts/submit-prompt.sh`. Do not start, restart, or kill ComfyUI for a normal generate.
 
 ## Downloads and mounts
 
@@ -102,8 +162,8 @@ Plan: `docs/superpowers/plans/2026-08-23-h3-comfyui-implement.md`.
 
 ## Read order
 
-1. This file
+1. This file — if the user asked to generate a video, stop after **Generate a video**
 2. `design/architecture.md` → `decisions.md` → `optimizations.md` → `operator.md` → `container.md`
-3. The implementation plan above, if you are building
+3. The implementation plan above, if you are building the stack (not a normal generate)
 
 Do not invent a different model, canvas, kernel stack, or serving path.

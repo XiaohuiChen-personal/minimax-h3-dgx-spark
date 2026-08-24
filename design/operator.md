@@ -110,7 +110,7 @@ Do not start Docker, do not `docker compose restart`, and do not `kill` ComfyUI 
 | Warm start | Do not start or restart ComfyUI per video |
 | Wall-clock | A warm 8.00 s job is minutes |
 | No multi-user serving | SSH-local. vLLM-Omni is a later D-01 option |
-| License | Operator accepts the Community License risk (D-13). Do not block a generate on an ack flag |
+| License | Excluded-territory users (EU, UK, Republic of Korea, United States) request approval at [platform.minimax.io/h3-license](https://platform.minimax.io/h3-license). Others do not. Do not block a generate on an ack flag (D-13). |
 
 ## What the agent must not do
 

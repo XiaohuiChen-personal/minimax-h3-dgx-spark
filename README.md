@@ -6,6 +6,8 @@ A DGX Spark (GB10) project for running [MiniMax H3](https://huggingface.co/MiniM
 
 This repository does **not** host model weights.
 
+**Disclaimer.** MiniMax H3 is under the MiniMax H3 Community License. **Excluded territories** (the European Union, the United Kingdom, the Republic of Korea, and the United States) must request authorization at [platform.minimax.io/h3-license](https://platform.minimax.io/h3-license) and wait for MiniMax’s approval before download or generate. Users **outside** those territories do not use that application path for this. This repository does not grant the license. The image does not check a license env flag (D-13).
+
 ## Current status
 
 | Phase | Role | State |
@@ -26,6 +28,38 @@ If you want the **measurements**, read the [research briefing](https://xiaohuich
 
 - This machine, now that the image and locked graphs exist.
 - Other DGX Spark users who want the same path without re-deriving quantization, canvas, step count, and ARM64 traps.
+
+## Deploy on a DGX Spark
+
+The runtime is **Docker**, not a host venv. The image is [`deploy/Dockerfile`](deploy/Dockerfile); Compose is [`deploy/compose.yaml`](deploy/compose.yaml). Pins and build traps: [`deploy/README.md`](deploy/README.md).
+
+This is **linux/arm64 / GB10 only**. Do not build or pull an x86_64 image. Weights stay on the host (`~/h3-weights`). They are never in git and never baked into a Docker layer. If you are in an excluded territory, get MiniMax approval at [platform.minimax.io/h3-license](https://platform.minimax.io/h3-license) **before** `download-weights.sh`.
+
+```bash
+git clone https://github.com/XiaohuiChen-personal/minimax-h3-dgx-spark.git
+cd minimax-h3-dgx-spark
+
+# Host trees (D-14). download-weights.sh creates the weight subfolders.
+mkdir -p "$HOME/h3-output" "$HOME/h3-data"
+# Needs the `hf` CLI (huggingface_hub). Do not use huggingface-cli.
+./scripts/download-weights.sh "$HOME/h3-weights"
+./scripts/check-weights.sh "$HOME/h3-weights"
+
+# From the repository root — compose build.context is `..`
+docker compose -f deploy/compose.yaml build
+docker compose -f deploy/compose.yaml up -d
+curl -fsS http://127.0.0.1:8188/system_stats
+
+# Default 8.00 s / 192 frames. Leave ComfyUI up; do not restart per video.
+./scripts/submit-prompt.sh workflows/h3-fl2va-default-8s.json \
+  --prompt "A quiet kitchen, morning light, a glass of water on the table." \
+  --seed 42 \
+  --name default-8s
+```
+
+SaveVideo writes `$HOME/h3-output/<name>_00001_.mp4`. Do not set `H3_LICENSE_ACK`. If a bind mount is empty, put absolute `H3_WEIGHTS` / `H3_OUTPUT` / `H3_DATA` in `deploy/.env` (paths only; no tokens).
+
+First `compose build` compiles SageAttention 2.2 and torchaudio from source. The image should be about **20 GiB**. If it is ~50 GiB, weights were copied into a layer — that is a bug. The NGC base is `nvcr.io/nvidia/pytorch:25.12-py3`; sign in to NGC if the pull is denied.
 
 ## Repository layout
 
@@ -80,4 +114,4 @@ Full cards: [`design/decisions.md`](design/decisions.md).
 
 ## License note
 
-The MiniMax H3 Community License exists and names excluded territories and output restrictions. This operator accepts that risk. The image does not require an acknowledgement flag to start (D-13). Pointer: [platform.minimax.io/h3-license](https://platform.minimax.io/h3-license).
+**Excluded territories only.** The Community License names the European Union, the United Kingdom, the Republic of Korea, and the United States as excluded territories, and it also restricts outputs. If you are in one of those territories, request authorization at [platform.minimax.io/h3-license](https://platform.minimax.io/h3-license) and wait for approval before you download weights or generate. If you are **not** in an excluded territory, you do not use that application path. This operator (United States) requested and received approval at that link. The Docker image still does not require `H3_LICENSE_ACK` to start (D-13) — the disclaimer is documentation, not a start lock.

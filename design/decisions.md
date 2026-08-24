@@ -165,7 +165,7 @@ Details: [`optimizations.md`](optimizations.md).
 
 **What we do.** The operator accepts the MiniMax H3 Community License risk. The entrypoint **must start** if the weight files are present. Do **not** require `H3_LICENSE_ACK`, a mounted notice, or an interactive prompt.
 
-A one-line pointer to [platform.minimax.io/h3-license](https://platform.minimax.io/h3-license) may stay in `deploy/README.md` for other Spark users. It is documentation, not a lock.
+README and `deploy/README.md` tell **excluded-territory** users (EU, UK, Republic of Korea, United States) to request approval at [platform.minimax.io/h3-license](https://platform.minimax.io/h3-license) before download or generate. Users outside those territories do not use that path. That disclaimer is documentation, not a start lock.
 
 **Rejected.** Refusing to start until an env flag is set. Making the implementing agent block on a license checklist.
 

@@ -1,5 +1,7 @@
 # `deploy/` — Spark runtime and container
 
+Image definition: [`Dockerfile`](Dockerfile). Compose: [`compose.yaml`](compose.yaml). For a new Spark, the numbered clone → weights → `compose` path is in the [root README](../README.md#deploy-on-a-dgx-spark).
+
 Pins recorded at implement time (Task 1 / Task 5 / Task 9). Do not float on `master`.
 
 | Pin | Value |
@@ -53,7 +55,7 @@ Leave ComfyUI up. Do not restart it for every video.
 
 SaveVideo writes a suffixed host path under `$HOME/h3-output` (for example `default-8s_00001_.mp4`), not `/opt/ComfyUI/output/…`. Do not set `H3_LICENSE_ACK`.
 
-MiniMax H3 Community License (documentation only, not a start lock): https://platform.minimax.io/h3-license
+**Disclaimer.** If you are in an excluded territory (EU, UK, Republic of Korea, United States), request MiniMax authorization at https://platform.minimax.io/h3-license and wait for approval before download or generate. If you are not in an excluded territory, you do not use that application path. This file does not grant the license. Documentation only — do not set `H3_LICENSE_ACK` (D-13).
 
 ## Build notes
 
