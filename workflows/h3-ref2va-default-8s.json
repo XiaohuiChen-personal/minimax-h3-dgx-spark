@@ -400,5 +400,32 @@
     "inputs": {
       "image": "example.png"
     }
+  },
+  "30": {
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "ref_image_6"
+    },
+    "inputs": {
+      "image": "example.png"
+    }
+  },
+  "31": {
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "ref_image_7"
+    },
+    "inputs": {
+      "image": "example.png"
+    }
+  },
+  "32": {
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "ref_image_8"
+    },
+    "inputs": {
+      "image": "example.png"
+    }
   }
 }

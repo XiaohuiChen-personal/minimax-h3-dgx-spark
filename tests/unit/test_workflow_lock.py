@@ -166,7 +166,7 @@ def test_ref2va_smoke_default_and_long():
             for node in prompt_graph(g).values()
             if node.get("class_type") == "LoadImage"
         ]
-        assert titles == [f"ref_image_{i}" for i in range(6)]
+        assert titles == [f"ref_image_{i}" for i in range(9)]
         prefixes = [
             (node.get("inputs") or {}).get("filename_prefix")
             for node in prompt_graph(g).values()
