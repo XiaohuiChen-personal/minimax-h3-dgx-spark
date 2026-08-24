@@ -331,7 +331,7 @@ $ ffprobe -v error -select_streams a:0 -show_entries stream=codec_type,channels 
 audio,2
 ```
 
-`channels=2`, `channel_layout=stereo`, `nb_frames` video **124**, duration **5.17 s**. `astats` **Number of NaNs: 0** / Infs 0. Overall RMS **-82.29 dB**, peak **-71.03 dB** (quiet kitchen, no speech in the prompt — not silent-NaN).
+`channels=2`, `channel_layout=stereo`, `nb_frames` video **124**, duration **5.17 s**. Whole-file `ffmpeg -af astats` (not last-frame `reset=1`): **Number of NaNs: 0** / Infs 0. Overall RMS **-47.06 dB**, peak **-26.16 dB** (quiet kitchen, no speech in the prompt — not silent-NaN). Per-channel RMS **-47.00 / -47.12 dB**. A last-window `reset=1` pair (−82.29 / −71.03) is AAC tail, not Overall.
 
 `./scripts/smoke-test.sh --offline-mp4 "$HOME/h3-output/smoke-5s17_00001_.mp4"` → exit 0.
 
