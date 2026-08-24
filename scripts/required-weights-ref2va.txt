@@ -1,0 +1,2 @@
+diffusion_models/minimax_h3_ref2va_pruned_fp8_scaled.safetensors
+loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors

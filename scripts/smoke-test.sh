@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Submit the 5.17 s smoke graph, or probe an existing mp4.
+# Submit a locked 5.17 s smoke graph, or probe an existing mp4.
 # Exit 0 only if the file has a video stream and stereo audio (ffprobe audio,2).
 # --offline-mp4: probe only. Do not test -f the workflow, call submit-prompt, or start Docker.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-WORKFLOW="$ROOT/workflows/h3-fl2va-smoke-5s17.json"
+WORKFLOW="$ROOT/workflows/h3-ref2va-smoke-5s17.json"
 SUBMIT="$ROOT/scripts/submit-prompt.sh"
 
 OFFLINE_MP4=""
@@ -16,7 +16,7 @@ FORWARD=()
 
 usage() {
   echo "usage: $0 --offline-mp4 <path>" >&2
-  echo "       $0 --prompt TEXT --seed N --name PREFIX [submit-prompt flags]" >&2
+  echo "       $0 --prompt TEXT --seed N --name PREFIX [--workflow PATH] [submit-prompt flags]" >&2
   exit 2
 }
 
@@ -24,6 +24,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --offline-mp4)
       OFFLINE_MP4="${2:?usage: --offline-mp4 <path>}"
+      shift 2
+      ;;
+    --workflow)
+      WORKFLOW="${2:?}"
       shift 2
       ;;
     --prompt)
@@ -38,7 +42,7 @@ while [[ $# -gt 0 ]]; do
       NAME="${2:?}"
       shift 2
       ;;
-    --first-frame|--last-frame|--base-url|--output-root)
+    --first-frame|--last-frame|--base-url|--output-root|--ref-image)
       FORWARD+=("$1" "${2:?}")
       shift 2
       ;;
@@ -82,7 +86,6 @@ if [[ -n "$OFFLINE_MP4" ]]; then
   exit 0
 fi
 
-# Live path only: require the locked 5.17 s graph. Do not start Docker or ComfyUI.
 if [[ ! -f "$WORKFLOW" ]]; then
   echo "error: missing workflow $WORKFLOW" >&2
   exit 1
@@ -101,7 +104,6 @@ if [[ "$rc" -ne 0 ]]; then
   exit "$rc"
 fi
 
-# Task 4 contract: show OUTPUT <host-path> (or the whole submit stdout) before probe.
 printf '%s\n' "$out"
 
 mp4=""

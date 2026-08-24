@@ -11,8 +11,9 @@ One **linux/arm64** image that:
 1. Starts ComfyUI on port **8188**
 2. Already has the H3 nodes, SPAN, Sage 2.2, Sol-Attn `triton_ref`, and FirstBlockCache `H3 Safe`
 3. Loads weights from a **host folder** (D-10)
-4. Serves the two locked workflows
+4. Serves the five locked workflows (FL2VA pair + Ref2VA 5.17 / 8.00 / 15.08)
 5. Accepts one GPU job at a time (ComfyUI’s own queue)
+6. Start-checks **shared + Ref2VA** (`H3_TASK=ref2va` default). FL2VA files may be on disk so that graph stays selectable; they are not required to start unless `H3_TASK=fl2va`
 
 The browser UI on 8188 is optional. The product is `POST /prompt`.
 
@@ -20,7 +21,7 @@ The browser UI on 8188 is optional. The product is `POST /prompt`.
 Spark host
   ~/h3-weights/<subdir>  ──ro──►  /opt/ComfyUI/models/<subdir>
   ~/h3-output    ──rw──►  /opt/ComfyUI/output
-  ~/h3-data      ──ro──►  /data          (optional first/last-frame pictures)
+  ~/h3-data      ──ro──►  /data          (optional identity stills / pictures)
 
 docker compose -f deploy/compose.yaml up -d  →  ComfyUI :8188  →  agent POST /prompt  →  ~/h3-output/*.mp4
 ```
@@ -29,36 +30,47 @@ docker compose -f deploy/compose.yaml up -d  →  ComfyUI :8188  →  agent POST
 
 | In the image | On the host (mounted) | Never |
 |---|---|---|
-| NVIDIA GPU PyTorch (CUDA 13, aarch64) | D-02 MiniMax files (~52 GiB) | MiniMax weights in a layer |
+| NVIDIA GPU PyTorch (CUDA 13, aarch64) | Shared + Ref2VA MiniMax files (FL2VA optional on disk) | MiniMax weights in a layer |
 | ComfyUI at a pinned SHA (D-11) | SPAN upscale file | x86_64 build |
-| Sol-Attn + H3 FirstBlockCache nodes | Optional keyframe pictures | `--lowvram` |
+| Sol-Attn + H3 FirstBlockCache nodes | Optional identity stills | `--lowvram` |
 | SageAttention 2.2.0 wheel | Generated mp4s | SageAttention 3 |
 | Locked workflow JSON + scripts | | Silent weight download |
 
 ## Host folder layout
 
-Create this tree **before** the first `compose up`. `./scripts/download-weights.sh "$HOME/h3-weights"` creates it; `./scripts/check-weights.sh` verifies it.
+Create this tree **before** the first `compose up`. `./scripts/download-weights.sh "$HOME/h3-weights"` defaults to `--task all` so both DiTs land and FL2VA stays selectable. `./scripts/check-weights.sh` verifies a task set (`--task ref2va|fl2va|all`; default `$H3_TASK` or `ref2va`).
+
+**Required to start** (`H3_TASK=ref2va`, the default): shared + Ref2VA.
 
 ```text
 ~/h3-weights/
-  diffusion_models/
-    minimax_h3_fl2va_pruned_fp8_scaled.safetensors
   text_encoders/
-    qwen3vl_32b_minimax_h3_int8_convrot.safetensors
+    qwen3vl_32b_minimax_h3_int8_convrot.safetensors      # shared
   vae/
-    minimax_h3_video_vae_fp16.safetensors
-    minimax_h3_audio_vae_fp32.safetensors
-  loras/
-    minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors
+    minimax_h3_video_vae_fp16.safetensors               # shared
+    minimax_h3_audio_vae_fp32.safetensors               # shared
   upscale_models/
-    2x-spanx2-ch48.pth
+    2x-spanx2-ch48.pth                                  # shared (SPAN)
+  diffusion_models/
+    minimax_h3_ref2va_pruned_fp8_scaled.safetensors     # required at default start
+  loras/
+    minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors
 ```
+
+**Optional on disk** (needed to *submit* FL2VA, not to start the default container):
+
+```text
+  diffusion_models/minimax_h3_fl2va_pruned_fp8_scaled.safetensors
+  loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors
+```
+
+`H3_TASK=fl2va` flips the start gate to shared + FL2VA. `required-weights.txt` is a compatibility wrapper (shared + default task). Prefer `--task`.
 
 `SPAN_FILE` is `upscale_models/2x-spanx2-ch48.pth` (official 2× SPAN ch48; OpenModelDB). Mount that **subfolder** only.
 
 Source for the MiniMax files: [huggingface.co/Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3).
 
-The entrypoint checks those **MiniMax** paths. If any file is missing, it prints the missing names and exits. It does not start ComfyUI.
+The entrypoint runs `check-weights.sh /opt/ComfyUI/models --task "${H3_TASK:-ref2va}"`. If any required file is missing, it prints the missing names and exits. It does not start ComfyUI. It does not preload a UNET.
 
 `~/h3-output` and `~/h3-data` may start empty.
 
@@ -81,7 +93,7 @@ Implemented in `deploy/Dockerfile`. Do not put the file in `docs/`.
    - runs the weight-file check (D-10)
    - starts ComfyUI with the launch flags below
    - does **not** require a license env flag (D-13)
-10. Labels: `comfyui.git_sha`, `base.image`, `h3.decision_set=D-01..D-14`.
+10. Labels: `comfyui.git_sha`, `base.image`, `h3.decision_set` (D-01…D-15; the image label is updated when the image is rebuilt).
 
 ### Launch flags (required)
 
@@ -154,8 +166,8 @@ cd minimax-h3-dgx-spark
 
 ```bash
 mkdir -p "$HOME/h3-weights" "$HOME/h3-output" "$HOME/h3-data"
-./scripts/download-weights.sh "$HOME/h3-weights"
-./scripts/check-weights.sh "$HOME/h3-weights"
+./scripts/download-weights.sh "$HOME/h3-weights" --task all
+./scripts/check-weights.sh "$HOME/h3-weights" --task all
 ```
 
 Do not commit the weights. Do not put them in the image.
@@ -192,13 +204,14 @@ A failing start with “missing checkpoint …” means the mount is wrong. Fix 
 From another terminal on the same Spark (or SSH with `-L 8188:127.0.0.1:8188`):
 
 ```bash
-./scripts/submit-prompt.sh workflows/h3-fl2va-smoke-5s17.json \
-  --prompt "A quiet kitchen, morning light, a glass of water on the table." \
+./scripts/submit-prompt.sh workflows/h3-ref2va-default-8s.json \
+  --prompt "<Picture 1> is the front of the subject. A quiet scene. Stereo room tone. No speech." \
   --seed 42 \
-  --name smoke-5s17
+  --name default-8s \
+  --ref-image "$HOME/h3-data/blue-front.jpg"
 ```
 
-The script `POST`s to `http://127.0.0.1:8188/prompt` and polls `/history/<prompt_id>` until the job finishes. First smoke test must be **5.17 s**. If that mp4 has video **and** stereo audio, then the default 8.00 s workflow is allowed.
+Default generate is the Ref2VA **8.00 s** graph. Fast smoke uses `workflows/h3-ref2va-smoke-5s17.json` (5.17 s). Text-only / no identity images uses the FL2VA pair. The script uploads `--ref-image` files, `POST`s to `http://127.0.0.1:8188/prompt`, and polls `/history/<prompt_id>`. Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4`. Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`.
 
 A second submit while the first is running should **queue**, not crash, and not start a second ComfyUI.
 
@@ -229,9 +242,9 @@ Prefer Compose so the mounts stay consistent.
 
 ## What is left
 
-The image, compose file, weight scripts (`download-weights.sh`, `check-weights.sh`), locked workflows, `submit-prompt.sh`, `smoke-test.sh`, and `deploy/README.md` are already in the tree. Do not rewrite them from a pre-implementation sketch.
+The image, compose file, weight scripts (`download-weights.sh --task`, `check-weights.sh --task`), five locked workflows, `submit-prompt.sh` (`--ref-image`), `smoke-test.sh`, and `deploy/README.md` are already in the tree. Do not rewrite them from a pre-implementation sketch.
 
-What remains after Task 11’s implementer commit is **parent close-out**: spec review → adversarial review and fix → re-smoke → `git push` (never force). Do not invent a different model, canvas, or serving stack.
+Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` (5.17 s / 124) and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4` (15.08 s / 362). Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`. Do not invent a different model, canvas, or serving stack.
 
 ## What this image is not
 

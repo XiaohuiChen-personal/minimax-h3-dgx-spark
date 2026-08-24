@@ -48,7 +48,7 @@
     <svg viewBox="0 0 980 200" role="img" aria-label="SSH to agent to ComfyUI API to mp4.">
       <rect x="20" y="50" width="170" height="90" rx="8" class="dbox-cold"/>
       <text x="105" y="88" text-anchor="middle" class="dhead">SSH / Cursor</text>
-      <text x="105" y="110" text-anchor="middle" class="dlabel-s">prompt + seed</text>
+      <text x="105" y="110" text-anchor="middle" class="dlabel-s">prompt + stills</text>
       <rect x="230" y="50" width="190" height="90" rx="8" class="dbox-cold"/>
       <text x="325" y="88" text-anchor="middle" class="dhead">Agent</text>
       <text x="325" y="110" text-anchor="middle" class="dlabel-s">patch workflow JSON</text>
@@ -73,8 +73,8 @@
   <ol>
     <li><strong>Leave ComfyUI running.</strong> Start it once. Do not restart per video.</li>
     <li><strong>SSH into the Spark</strong> and open Cursor or Claude on that machine.</li>
-    <li><strong>Ask for a generate</strong> against the default 8.00 s or smoke-test 5.17 s workflow.</li>
-    <li><strong>The agent changes only free fields</strong> (prompt, seed, filename, optional first/last-frame image files) and <code>POST</code>s to <code>/prompt</code>.</li>
+    <li><strong>Ask for a generate</strong> against the default Ref2VA 8.00 s graph (or 5.17 / 15.08). Text-only uses the FL2VA pair.</li>
+    <li><strong>The agent changes only free fields</strong> (prompt, seed, filename, optional <code>--ref-image</code> host files) and <code>POST</code>s to <code>/prompt</code> after <code>POST /upload/image</code>.</li>
     <li><strong>It polls <code>/history/&lt;prompt_id&gt;</code></strong> for minutes, then returns the host path under <code>~/h3-output</code> (SaveVideo suffix, e.g. <code>default-8s_00001_.mp4</code>).</li>
   </ol>
 </section>
@@ -87,9 +87,9 @@
       <thead><tr><th>When</th><th>Step</th></tr></thead>
       <tbody>
         <tr><td class="k">Once</td><td>Load DiT, Qwen3-VL, VAEs, LoRA, SPAN if not already resident</td></tr>
-        <tr><td class="k">Once</td><td>Qwen3-VL encodes the prompt; optional first/last frames go to Qwen <em>and</em> the video VAE</td></tr>
+        <tr><td class="k">Once</td><td>Qwen3-VL encodes the prompt; Ref2VA identity stills (<code>--ref-image</code>, 1–9) go to the same reader</td></tr>
         <tr><td class="k">Once</td><td>Allocate empty video + audio latents at 960×544</td></tr>
-        <tr><td class="k">× 8</td><td>Pack text + optional keyframe latents + noise; denoise both streams</td></tr>
+        <tr><td class="k">× 4 / × 8</td><td>Ref2VA 4 steps (official Ref2V Turbo); FL2VA 8 steps. Pack text + optional stills + noise; denoise both streams</td></tr>
         <tr><td class="k">After</td><td>Decode both VAEs, SPAN 2×, mux mp4</td></tr>
       </tbody>
     </table>
@@ -102,30 +102,41 @@
     <table>
       <thead><tr><th>Locked in the workflow</th><th>Agent may change</th></tr></thead>
       <tbody>
-        <tr><td>D-02 checkpoints</td><td>Text prompt</td></tr>
-        <tr><td>960×544, 8 steps, SPAN 2×</td><td>Seed</td></tr>
-        <tr><td>5.17 s smoke or 8.00 s default</td><td>Output filename</td></tr>
-        <tr><td>Sampler, shifts, Sage 2.2, Sol-Attn triton_ref, FBC H3 Safe</td><td>Optional first/last-frame image files</td></tr>
+        <tr><td>D-15 Ref2VA DiT + 4-step LoRA (or D-02 FL2VA)</td><td>Text prompt</td></tr>
+        <tr><td>960×544, SPAN 2×, Euler+simple, shifts 6 / 3</td><td>Seed</td></tr>
+        <tr><td>Ref2VA 4 steps / FL2VA 8 steps</td><td>Output filename</td></tr>
+        <tr><td>Sampler, Sage 2.2, Sol-Attn triton_ref, FBC H3 Safe</td><td>Optional <code>--ref-image</code> host files (1–9)</td></tr>
       </tbody>
     </table>
   </div>
-  <p style="margin-top:14px">Ask for “10 seconds” and snap to <strong>10.13 s</strong> or refuse. Do not invent a new DAG for a normal generate.</p>
+  <div class="scroller" style="margin-top:14px">
+    <table>
+      <thead><tr><th>Role</th><th>File</th><th>Length</th></tr></thead>
+      <tbody>
+        <tr><td>Fast smoke</td><td class="k">h3-ref2va-smoke-5s17.json</td><td>5.17 s / 124</td></tr>
+        <tr><td>Default generate</td><td class="k">h3-ref2va-default-8s.json</td><td>8.00 s / 192</td></tr>
+        <tr><td>Long (optional)</td><td class="k">h3-ref2va-long-15s08.json</td><td><strong>15.08 s / 362</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top:14px">Snap “15 s” / “15.04 s” to <strong>15.08 s / 362</strong>. Never invent 15.00 / 15.04. “10 seconds” → <strong>10.13 s</strong> or refuse. Text-only uses the FL2VA pair. Do not invent a new DAG.</p>
 </section>
 
 <section>
-  <div class="shead"><span class="snum">05</span><h2>Keyframes — attach pictures, same graph</h2></div>
-  <p class="sdek">Default is text-only. The VAE does not create keyframes. The agent attaches files; the locked node encodes them.</p>
+  <div class="shead"><span class="snum">05</span><h2>Identity stills — Ref2VA <code>--ref-image</code></h2></div>
+  <p class="sdek">Default generate is Ref2VA. 3-view sheets are this path, not <code>first_frame</code>. Variable 1–9. Live Ref2VA smokes exist on this Spark: <code>~/h3-output/smoke-ref2va-5s17_00001_.mp4</code> and <code>~/h3-output/smoke-ref2va-15s08_00001_.mp4</code>. Do not commit the mp4s.</p>
   <div class="scroller">
     <table>
-      <thead><tr><th>What the agent does</th><th>What the node does</th><th>Result</th></tr></thead>
+      <thead><tr><th>What the agent does</th><th>What happens</th><th>Result</th></tr></thead>
       <tbody>
-        <tr><td>Wire <code>first_frame</code> / <code>last_frame</code> image files</td><td><code>clip.tokenize(prompt, images=…)</code></td><td>Qwen3-VL sees the pictures (semantics)</td></tr>
-        <tr><td>Same files, same node</td><td><code>vae.encode</code> → frozen <code>minimax_keyframes</code></td><td>Pixel lock: frame 1 / last frame <em>is</em> that image</td></tr>
-        <tr><td>Write <code>&lt;Picture 1&gt;</code> in the prompt only</td><td>Nothing useful on this graph</td><td>Empty theater — those tags are Ref2VA / hosted rewriter</td></tr>
+        <tr><td>Repeat <code>--ref-image</code> (1–9 host files)</td><td><code>POST /upload/image</code>, then nested <code>ref_images</code></td><td>Identity. Prompt uses 1-based <code>&lt;Picture N&gt;</code> in upload order</td></tr>
+        <tr><td>Write <code>&lt;Picture N&gt;</code> on an FL2VA graph</td><td>Nothing useful</td><td>Empty theater — do not do this</td></tr>
+        <tr><td>Treat a 3-view sheet as <code>first_frame</code></td><td>Fail-close on locked FL2VA T2V</td><td>Wrong path</td></tr>
+        <tr><td>Omit <code>--ref-image</code> on Ref2VA</td><td>POST without a <code>ref_images</code> dict</td><td>Not a proven identity generate — use FL2VA</td></tr>
       </tbody>
     </table>
   </div>
-  <p style="margin-top:14px">Attaching pictures to the prompt does <strong>not</strong> replace the VAE path. Prompt-only images are semantic. VAE keyframe latents are what make the opening or closing frame match. Do not switch to Ref2VA for a normal generate.</p>
+  <p style="margin-top:14px">Nine titles <code>ref_image_0</code>…<code>ref_image_8</code>. Leftover LoadImages stay unlinked <code>example.png</code>. 10+ fail-close. Six-bird smokes are N=6 of 9. Start gate: <code>H3_TASK=ref2va</code> (default) or <code>H3_TASK=fl2va</code>. Still no negative prompt / CFG.</p>
 </section>
 
 <section>
@@ -150,9 +161,9 @@
     <li>Enable EasyCache, SageAttention 3, a blind <code>--use-sage-attention</code> flag, Sol-Attn <code>flex_attention</code>, Turbo-SLA on top of Sol-Attn, or <code>--lowvram</code></li>
     <li>Change canvas, steps, or length except to another legal pair (5.17 / 8.00 / 10.13 / 15.08 s)</li>
     <li>Start or restart ComfyUI for a normal generate</li>
-    <li>Treat <code>&lt;Picture N&gt;</code> prompt tags as a substitute for wiring first/last-frame image inputs</li>
-    <li>Run a separate VAE pass or another image model just to “make keyframes”</li>
-    <li>Switch the graph to Ref2VA for a normal first/last-frame generate</li>
+    <li>Treat <code>&lt;Picture N&gt;</code> as a substitute for <code>--ref-image</code> uploads, or write those tags on FL2VA</li>
+    <li>Treat a 3-view sheet as <code>first_frame</code></li>
+    <li>Strap the FL2V 8-step LoRA onto Ref2VA, or invent 15.00 / 15.04 lengths</li>
     <li>Start a second ComfyUI because the first job is “taking too long”</li>
   </ul>
 </section>
@@ -164,6 +175,7 @@
     <table>
       <thead><tr><th>Step</th><th>Call</th></tr></thead>
       <tbody>
+        <tr><td>Upload stills</td><td><code>POST /upload/image</code> per <code>--ref-image</code> (host files; graph stores the uploaded name)</td></tr>
         <tr><td>Submit</td><td><code>POST /prompt</code> with the patched workflow JSON</td></tr>
         <tr><td>Wait</td><td><code>GET /history/&lt;prompt_id&gt;</code> every few seconds — minutes, not seconds</td></tr>
         <tr><td>Done</td><td>Return the host path under <code>~/h3-output</code></td></tr>
@@ -173,7 +185,7 @@
   </div>
 </section>
 
-<p class="foot">Working source: <code>design/operator.md</code>. The image, locked workflows, and <code>scripts/submit-prompt.sh</code> are already in the tree. Generate only if ComfyUI is already up on 8188. Deploy recipe: <a href="container.html">Container</a>.</p>
+<p class="foot">Working source: <code>design/operator.md</code>. Five locked graphs and <code>scripts/submit-prompt.sh</code> are in the tree. Live Ref2VA smokes exist on this Spark at <code>~/h3-output/smoke-ref2va-5s17_00001_.mp4</code> and <code>~/h3-output/smoke-ref2va-15s08_00001_.mp4</code>. Do not commit the mp4s. SaveVideo adds <code>_00001_</code>. Never print <code>/opt/ComfyUI/output</code>. Generate only if ComfyUI is already up on 8188. Deploy recipe: <a href="container.html">Container</a>.</p>
 
 </div>
 </body>

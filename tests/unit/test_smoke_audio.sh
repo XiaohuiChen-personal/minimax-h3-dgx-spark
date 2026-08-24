@@ -76,7 +76,7 @@ LIVE="$TMP/live"
 mkdir -p "$LIVE/scripts" "$LIVE/workflows"
 cp "$SMOKE" "$LIVE/scripts/smoke-test.sh"
 chmod +x "$LIVE/scripts/smoke-test.sh"
-: > "$LIVE/workflows/h3-fl2va-smoke-5s17.json"
+: > "$LIVE/workflows/h3-ref2va-smoke-5s17.json"
 cat > "$LIVE/scripts/submit-prompt.sh" <<EOF
 #!/usr/bin/env bash
 if [[ "\${H3_SMOKE_SUBMIT_FAIL:-}" == "1" ]]; then
@@ -98,5 +98,32 @@ live_rc=$?
 set -e
 [[ "$live_rc" -eq 7 ]]
 printf '%s\n' "$live_fail" | grep -q 'prompt rejected'
+
+# Default live graph is the Ref2VA 5.17 file. --workflow / --ref-image must reach submit.
+grep -q 'WORKFLOW="$ROOT/workflows/h3-ref2va-smoke-5s17.json"' "$SMOKE"
+if grep -q 'h3-fl2va-smoke-5s17.json' "$SMOKE"; then
+  echo "smoke-test.sh default must not be the FL2VA 5.17 graph"; exit 1
+fi
+
+ARGS_LOG="$TMP/submit-args.txt"
+CUSTOM_WF="$LIVE/workflows/custom-ref2va.json"
+REF_IMG="$TMP/ref-still.jpg"
+: > "$CUSTOM_WF"
+: > "$REF_IMG"
+cat > "$LIVE/scripts/submit-prompt.sh" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" > "$ARGS_LOG"
+echo "OUTPUT $TMP/stereo-tone.mp4"
+exit 0
+EOF
+chmod +x "$LIVE/scripts/submit-prompt.sh"
+
+"$LIVE_SMOKE" --prompt 'a cat' --seed 1 --name live-ok \
+  --workflow "$CUSTOM_WF" \
+  --ref-image "$REF_IMG" >/dev/null
+
+grep -q -- "$CUSTOM_WF" "$ARGS_LOG"
+grep -q -- "--ref-image" "$ARGS_LOG"
+grep -q -- "$REF_IMG" "$ARGS_LOG"
 
 echo OK

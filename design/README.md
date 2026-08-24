@@ -5,7 +5,7 @@ These notes are the contract. The shipped workflows, scripts, and Docker image m
 Read in this order:
 
 1. [`architecture.md`](architecture.md) — what the machine does, in plain language
-2. [`decisions.md`](decisions.md) — the numbered choices (D-01…D-14)
+2. [`decisions.md`](decisions.md) — the numbered choices (D-01…D-15)
 3. [`optimizations.md`](optimizations.md) — what to speed up, and what never to turn on
 4. [`operator.md`](operator.md) — how a person and an agent use the running server
 5. [`container.md`](container.md) — how to build and start the Docker image
@@ -22,13 +22,17 @@ Evidence behind the numbers lives in the [research briefing](https://xiaohuichen
 
 ## What is already decided
 
-The product is: SSH into a DGX Spark, ask Cursor or Claude to generate, get an mp4. One GPU job at a time. ComfyUI stays up. The graph is predefined.
+The product is: SSH into a DGX Spark, ask Cursor or Claude to generate, get an mp4. One GPU job at a time. ComfyUI stays up. The graph is predefined. **Default generate is Ref2VA 8.00 s** (D-15). FL2VA stays the text-only / no-identity path.
 
-Implementation plan (tasks, tests, download-speed log vs 8 Gbps):
+Executed FL2VA implement path:
 
 - [`docs/superpowers/plans/2026-08-23-h3-comfyui-implement.md`](../docs/superpowers/plans/2026-08-23-h3-comfyui-implement.md)
 
-That plan is the executed implementation path. Tasks 1–10 are done (5.17 s smoke PASSed). Task 11 is the default **8.00 s** generate plus docs pins (`BASE_IMAGE`, `COMFYUI_SHA`, `SPAN_FILE`, `docker compose -f deploy/compose.yaml up -d`, no `H3_LICENSE_ACK`). Remaining after Task 11’s implementer commit: parent close-out (spec review → adversarial review **and fix** → re-smoke → **`git push`**, never force). Do not invent a different model, canvas, kernel stack, or serving path.
+Current default-task plan (D-15):
+
+- [`docs/superpowers/plans/2026-08-23-h3-ref2va-default.md`](../docs/superpowers/plans/2026-08-23-h3-ref2va-default.md)
+
+That plan is the implementation path for Ref2VA as default. Locked graphs are in the tree. Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4`. Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`. Do not invent a different model, canvas, kernel stack, or serving path.
 
 Start commands and pins: [`../deploy/README.md`](../deploy/README.md). Evidence: [`../measurements/prereq.md`](../measurements/prereq.md), [`../measurements/download-log.md`](../measurements/download-log.md).
 
@@ -36,12 +40,16 @@ Implementation details that override the shape sketches in this folder:
 
 - **Mounts:** bind each weight *subfolder* (`diffusion_models`, `text_encoders`, `vae`, `loras`, `upscale_models`). Do not mount the whole `~/h3-weights` tree over `/opt/ComfyUI/models`.
 - **SPAN:** `upscale_models/2x-spanx2-ch48.pth` (`SPAN_FILE`).
-- **Downloads:** `hf download Comfy-Org/MiniMax-H3 <repo-relative-path> --local-dir "$DIR"`. Not `huggingface-cli`, not `--local-dir-use-symlinks`, not `--include "*.safetensors"` (471 G including Ref2VA).
-- **Stock T2V template** is UI-format and **not** D-02 (INT8 DiT, NVFP4 TE, 1344×768, 4 steps, `length` 73, node id 124 is a scheduler). Convert to API format and lock this design.
+- **Downloads:** `hf download Comfy-Org/MiniMax-H3 <repo-relative-path> --local-dir "$DIR"`. `download-weights.sh DIR [--task ref2va|fl2va|all]` (default `--task all`). Not `huggingface-cli`, not `--local-dir-use-symlinks`, not `--include "*.safetensors"` (471 G including Ref2VA).
+- **Start set:** shared + Ref2VA (`H3_TASK=ref2va`). FL2VA files are optional on disk.
+- **Stock T2V / R2V templates** are UI-format and **not** this product. Convert to API format and lock this design.
 
 Shipped files that must keep following this design:
 
+- `workflows/h3-ref2va-smoke-5s17.json`
+- `workflows/h3-ref2va-default-8s.json`
+- `workflows/h3-ref2va-long-15s08.json`
 - `workflows/h3-fl2va-smoke-5s17.json`
 - `workflows/h3-fl2va-default-8s.json`
-- `scripts/` download, check-weights, submit/poll, smoke-test
+- `scripts/` download (`--task`), check-weights, submit/poll (`--ref-image`), smoke-test
 - `deploy/Dockerfile` and `deploy/compose.yaml`

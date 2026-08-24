@@ -29,7 +29,7 @@
 <header class="top">
   <div class="wrap">
     <div class="eyebrow">
-      <span>Design</span><span>D-09…D-14</span><span>Image exists (h3-spark:local)</span>
+      <span>Design</span><span>D-09…D-15</span><span>Image exists (h3-spark:local)</span>
     </div>
     <h1>Build it and start it</h1>
     <p class="standfirst">
@@ -71,10 +71,10 @@
     <table>
       <thead><tr><th>In the image</th><th>On the host</th><th>Never</th></tr></thead>
       <tbody>
-        <tr><td>NVIDIA GPU PyTorch, CUDA 13, ARM64</td><td>D-02 MiniMax files (~52 GiB)</td><td>Weights in a layer</td></tr>
+        <tr><td>NVIDIA GPU PyTorch, CUDA 13, ARM64</td><td>Shared + Ref2VA (FL2VA optional on disk)</td><td>Weights in a layer</td></tr>
         <tr><td>ComfyUI at a pinned SHA</td><td>SPAN file</td><td>x86_64 build</td></tr>
-        <tr><td>Sage 2.2, Sol-Attn, FBC H3 Safe</td><td>Optional keyframe pictures</td><td><code>--lowvram</code>, Sage 3</td></tr>
-        <tr><td>Locked workflow JSON + scripts</td><td>Generated mp4s</td><td>Silent download</td></tr>
+        <tr><td>Sage 2.2, Sol-Attn, FBC H3 Safe</td><td>Optional identity stills</td><td><code>--lowvram</code>, Sage 3</td></tr>
+        <tr><td>Five locked workflow JSON + scripts</td><td>Generated mp4s</td><td>Silent download</td></tr>
       </tbody>
     </table>
   </div>
@@ -82,14 +82,19 @@
 
 <section>
   <div class="shead"><span class="snum">03</span><h2>Host folder for weights</h2></div>
-  <pre class="shell">~/h3-weights/
-  diffusion_models/minimax_h3_fl2va_pruned_fp8_scaled.safetensors
+  <pre class="shell"># required to start (H3_TASK=ref2va): shared + Ref2VA
+~/h3-weights/
   text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors
   vae/minimax_h3_video_vae_fp16.safetensors
   vae/minimax_h3_audio_vae_fp32.safetensors
-  loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors
-  upscale_models/2x-spanx2-ch48.pth</pre>
-  <p style="margin-top:14px">Source: <code>Comfy-Org/MiniMax-H3</code>. If a required MiniMax file is missing, the container must exit and print the names.</p>
+  upscale_models/2x-spanx2-ch48.pth
+  diffusion_models/minimax_h3_ref2va_pruned_fp8_scaled.safetensors
+  loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors
+
+# optional on disk (submit FL2VA; not required to start)
+  diffusion_models/minimax_h3_fl2va_pruned_fp8_scaled.safetensors
+  loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors</pre>
+  <p style="margin-top:14px">Source: <code>Comfy-Org/MiniMax-H3</code>. Downloader: <code>download-weights.sh DIR [--task ref2va|fl2va|all]</code> (default <code>--task all</code>). Entrypoint checks <code>--task "${H3_TASK:-ref2va}"</code>. Missing required files → exit and print the names.</p>
 </section>
 
 <section>
@@ -113,10 +118,10 @@
   <p class="sdek">Do this on the DGX Spark, not on a laptop. Invoke Compose from the repository root. Exact pins: <code>deploy/README.md</code>.</p>
   <ol>
     <li><strong>Confirm the box.</strong> <code>uname -m</code> is <code>aarch64</code>. <code>nvidia-smi</code> sees the GB10. Docker can use <code>--gpus all</code>.</li>
-    <li><strong>Download weights</strong> into <code>~/h3-weights</code> subfolders (<code>./scripts/download-weights.sh</code>). Also create <code>~/h3-output</code> and <code>~/h3-data</code>.</li>
+    <li><strong>Download weights</strong> into <code>~/h3-weights</code> subfolders (<code>./scripts/download-weights.sh "$HOME/h3-weights" --task all</code>). Also create <code>~/h3-output</code> and <code>~/h3-data</code>.</li>
     <li><strong>Build.</strong> <code>docker compose -f deploy/compose.yaml build</code>. If the image is ~50 GiB, weights were baked in — that is a bug.</li>
     <li><strong>Start once.</strong> <code>docker compose -f deploy/compose.yaml up -d</code>. Wait for port 8188. Leave it up. Do not restart per video.</li>
-    <li><strong>Smoke test</strong> the 5.17 s workflow via <code>scripts/submit-prompt.sh</code> only if ComfyUI is already up. If the mp4 has video and stereo audio, the 8.00 s default is allowed. Host path is <code>~/h3-output/&lt;name&gt;_00001_.mp4</code>.</li>
+    <li><strong>Default generate</strong> is Ref2VA 8.00 s via <code>scripts/submit-prompt.sh workflows/h3-ref2va-default-8s.json</code> plus <code>--ref-image</code> (1–9) only if ComfyUI is already up. Live Ref2VA smokes exist on this Spark: <code>~/h3-output/smoke-ref2va-5s17_00001_.mp4</code> and <code>~/h3-output/smoke-ref2va-15s08_00001_.mp4</code>. Do not commit the mp4s. SaveVideo adds <code>_00001_</code>. Never print <code>/opt/ComfyUI/output</code>. Host path is <code>~/h3-output/&lt;name&gt;_00001_.mp4</code>.</li>
     <li><strong>Stop only when you mean to free the GPU.</strong> <code>docker compose -f deploy/compose.yaml down</code> unloads the models.</li>
   </ol>
   <pre class="shell">docker run --gpus all --name h3-comfy \
@@ -136,7 +141,7 @@
   <div class="shead"><span class="snum">06</span><h2>What is already shipped</h2></div>
   <ol>
     <li><code>scripts/download-weights.sh</code> and <code>check-weights.sh</code></li>
-    <li>The two locked workflow JSON files</li>
+    <li>Five locked workflow JSON files (FL2VA pair + Ref2VA 5.17 / 8.00 / 15.08)</li>
     <li><code>scripts/submit-prompt.sh</code> and <code>smoke-test.sh</code></li>
     <li><code>deploy/Dockerfile</code>, <code>deploy/compose.yaml</code>, and <code>deploy/README.md</code></li>
   </ol>

@@ -24,5 +24,14 @@ Method: wall-clock around the transfer; bytes from the finished file or `docker 
 | 2026-08-24T00:26:30Z | sageattention-2.2.0 | thu-ml/SageAttention@v2.2.0 pip --no-build-isolation | 14815972 | 75.29 | 0.2 | 0.0 | wheel size=14815972; TORCH_CUDA_ARCH_LIST=12.0; no sageattn3 |
 | 2026-08-24T00:32:01Z | pytorch-audio.git | https://github.com/pytorch/audio.git | 152781757 | 2.31 | 63.1 | 6.6 | branch=v2.9.0; docker build |
 | 2026-08-24T00:32:01Z | torchaudio-2.9.0 | pytorch/audio@v2.9.0 source --no-build-isolation | 11240823 | 81.31 | 0.1 | 0.0 | NGC torch kept; BUILD_SOX=0 USE_FFMPEG=0; package bytes |
+| 2026-08-24T03:02:00Z | text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors | https://huggingface.co/Comfy-Org/MiniMax-H3 | 27141342152 | 0 | n/a | n/a | cache-hit |
+| 2026-08-24T03:02:00Z | vae/minimax_h3_video_vae_fp16.safetensors | https://huggingface.co/Comfy-Org/MiniMax-H3 | 5207808496 | 0 | n/a | n/a | cache-hit |
+| 2026-08-24T03:02:00Z | vae/minimax_h3_audio_vae_fp32.safetensors | https://huggingface.co/Comfy-Org/MiniMax-H3 | 605254808 | 0 | n/a | n/a | cache-hit |
+| 2026-08-24T03:02:00Z | upscale_models/2x-spanx2-ch48.pth | https://objectstorage.us-phoenix-1.oraclecloud.com/n/ax6ygfvpvzka/b/open-modeldb-files/o/2x-spanx2-ch48.pth | 8942586 | 0 | n/a | n/a | cache-hit |
+| 2026-08-24T03:02:42Z | diffusion_models/minimax_h3_ref2va_pruned_fp8_scaled.safetensors | https://huggingface.co/Comfy-Org/MiniMax-H3 | 20958205608 | 42.13 | 474.4 | 49.7 | hf download positional; stat bytes |
+| 2026-08-24T03:02:46Z | loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors | https://huggingface.co/Comfy-Org/MiniMax-H3 | 1956193000 | 3.91 | 477.1 | 50.0 | hf download positional; stat bytes |
+| 2026-08-24T03:02:46Z | diffusion_models/minimax_h3_fl2va_pruned_fp8_scaled.safetensors | https://huggingface.co/Comfy-Org/MiniMax-H3 | 20958205608 | 0 | n/a | n/a | cache-hit |
+| 2026-08-24T03:02:46Z | loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors | https://huggingface.co/Comfy-Org/MiniMax-H3 | 1956193000 | 0 | n/a | n/a | cache-hit |
+| 2026-08-24T04:07:16Z | h3-spark:local | docker compose -f deploy/compose.yaml build | 21008788308 | 0 | n/a | n/a | cache-hit; linux/arm64; inspect Size; LABEL D-01..D-15; expensive layers CACHED; COPY scripts/workflows rerun |
 
 Task 6 D-02 + SPAN vs 8 Gbps (1000 MB/s): six files, **55,877,746,650** `stat` bytes (**52.04 GiB**), **85.97 s** wall-clock sum (not overlapping). Best file: INT8 TE **844.0 MiB/s** (88.5% of line rate). Worst file: SPAN **8.4 MiB/s** (0.9%; 8.5 MiB from Oracle Phoenix, RTT-bound). Aggregate **619.9 MiB/s** / **65.0%** of 1000 MB/s. A perfect 1e9 B/s line would need **~55.9 s**; Hugging Face on this path was faster than the NGC image pull (103.5 MiB/s) and slower than line rate, as expected.

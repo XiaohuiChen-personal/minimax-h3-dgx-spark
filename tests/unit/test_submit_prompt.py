@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -35,10 +36,32 @@ SUCCESS_HISTORY = {
 }
 
 
+def _multipart_filename(body: bytes) -> str:
+    text = body.decode("latin-1")
+    quoted = re.search(r'filename="([^"]+)"', text)
+    if quoted:
+        return os.path.basename(quoted.group(1))
+    bare = re.search(r"filename=([^;\r\n]+)", text)
+    if bare:
+        return os.path.basename(bare.group(1).strip().strip('"'))
+    return ""
+
+
+def _multipart_field_name(body: bytes) -> str:
+    """Return the multipart form field. Do not search bare name=" — that hits filename="."""
+    text = body.decode("latin-1")
+    match = re.search(r'form-data;\s*name="([^"]+)"', text)
+    return match.group(1) if match else ""
+
+
 class MockComfyServer(HTTPServer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.posted: list[object] = []
+        self.uploads: list[str] = []
+        self.upload_fields: list[str] = []
+        self.upload_status = 200
+        self.upload_name_prefix = ""
         self.history_gets = 0
         self.history_error = False
         self.history_payload = SUCCESS_HISTORY
@@ -60,6 +83,17 @@ class MockComfyHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        if path == "/upload/image":
+            filename = _multipart_filename(body)
+            self.server.uploads.append(filename)
+            self.server.upload_fields.append(_multipart_field_name(body))
+            status = getattr(self.server, "upload_status", 200)
+            prefix = getattr(self.server, "upload_name_prefix", "")
+            self._send_json(
+                status,
+                {"name": f"{prefix}{filename}", "subfolder": "", "type": "input"},
+            )
+            return
         if path == "/prompt":
             self.server.posted.append(json.loads(body.decode("utf-8")))
             self._send_json(
@@ -199,6 +233,8 @@ def test_rewrites_keyframe_host_paths_to_data(tmp_path, mock_comfy):
     graph = mock_comfy.posted[0]["prompt"]
     assert _input_values(graph, "first_frame") == ["/data/first.png"]
     assert _input_values(graph, "last_frame") == ["/data/shots/last.png"]
+    assert mock_comfy.uploads == []
+    assert mock_comfy.upload_fields == []
 
     host_out = str(output_root.resolve() / "clips" / "history-name.mp4")
     assert "OUTPUT" in result.stdout
@@ -368,3 +404,351 @@ def test_history_prefers_output_mp4_over_input_or_temp_images(tmp_path, mock_com
     assert "first.png" not in result.stdout
     assert "ComfyUI_temp" not in result.stdout
     assert "/opt/ComfyUI/output" not in result.stdout
+
+
+def test_ref_images_upload_and_nested_wiring(tmp_path, mock_comfy):
+    workflow = tmp_path / "tiny-ref2va-workflow.json"
+    shutil.copy(REPO / "tests/fixtures/tiny-ref2va-workflow.json", workflow)
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    img0 = tmp_path / "blue.png"
+    img1 = tmp_path / "yellow.png"
+    img0.write_bytes(b"x")
+    img1.write_bytes(b"y")
+    port = mock_comfy.server_address[1]
+    result = subprocess.run(
+        [
+            sys.executable, str(SCRIPT), str(workflow),
+            "--prompt", "<Picture 1> blue bird. <Picture 2> yellow bird.",
+            "--seed", "7", "--name", "unit",
+            "--base-url", f"http://127.0.0.1:{port}",
+            "--output-root", str(output_root),
+            "--ref-image", str(img0), "--ref-image", str(img1),
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    graph = mock_comfy.posted[0]["prompt"]
+    assert graph["24"]["inputs"]["image"] == "blue.png"
+    assert graph["25"]["inputs"]["image"] == "yellow.png"
+    assert graph["10"]["inputs"]["ref_images"] == {
+        "ref_image_0": ["24", 0],
+        "ref_image_1": ["25", 0],
+    }
+    assert "ref_image_0" not in graph["10"]["inputs"]
+    assert mock_comfy.uploads == ["blue.png", "yellow.png"]
+    assert mock_comfy.upload_fields == ["image", "image"]
+
+
+def test_ref_image_fails_on_fl2va_fixture_without_loadimage(tmp_path, mock_comfy):
+    img = tmp_path / "blue.png"
+    img.write_bytes(b"x")
+    port = mock_comfy.server_address[1]
+    result, _output_root, _workflow = _run_submit(
+        tmp_path, port, extra=["--ref-image", str(img)]
+    )
+    combined = (result.stderr + result.stdout).lower()
+    assert result.returncode != 0
+    assert result.returncode == 1
+    assert "ref-image" in combined
+    assert "unrecognized arguments" not in combined
+    assert not mock_comfy.posted
+    assert mock_comfy.uploads == []
+
+
+def test_ref_image_fails_when_not_enough_loadimage_titles(tmp_path, mock_comfy):
+    data = json.loads(
+        (REPO / "tests/fixtures/tiny-ref2va-workflow.json").read_text(encoding="utf-8")
+    )
+    del data["25"]
+    workflow = tmp_path / "one-ref.json"
+    workflow.write_text(json.dumps(data), encoding="utf-8")
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    img0 = tmp_path / "blue.png"
+    img1 = tmp_path / "yellow.png"
+    img0.write_bytes(b"x")
+    img1.write_bytes(b"y")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(workflow),
+            "--prompt",
+            "hello",
+            "--seed",
+            "7",
+            "--name",
+            "unit",
+            "--base-url",
+            f"http://127.0.0.1:{mock_comfy.server_address[1]}",
+            "--output-root",
+            str(output_root),
+            "--ref-image",
+            str(img0),
+            "--ref-image",
+            str(img1),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "ref-image" in (result.stderr + result.stdout).lower()
+    assert not mock_comfy.posted
+    assert mock_comfy.uploads == []
+
+
+def test_ref_image_fails_when_upload_not_200(tmp_path, mock_comfy):
+    mock_comfy.upload_status = 500
+    workflow = tmp_path / "tiny-ref2va-workflow.json"
+    shutil.copy(REPO / "tests/fixtures/tiny-ref2va-workflow.json", workflow)
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    img = tmp_path / "blue.png"
+    img.write_bytes(b"x")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(workflow),
+            "--prompt",
+            "hello",
+            "--seed",
+            "7",
+            "--name",
+            "unit",
+            "--base-url",
+            f"http://127.0.0.1:{mock_comfy.server_address[1]}",
+            "--output-root",
+            str(output_root),
+            "--ref-image",
+            str(img),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "ref-image" in (result.stderr + result.stdout).lower()
+    assert not mock_comfy.posted
+
+
+def test_ref_image_rejects_more_than_nine(tmp_path, mock_comfy):
+    workflow = tmp_path / "tiny-ref2va-workflow.json"
+    shutil.copy(REPO / "tests/fixtures/tiny-ref2va-workflow.json", workflow)
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    extras = []
+    for i in range(10):
+        img = tmp_path / f"ref{i}.png"
+        img.write_bytes(b"x")
+        extras.extend(["--ref-image", str(img)])
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(workflow),
+            "--prompt",
+            "hello",
+            "--seed",
+            "7",
+            "--name",
+            "unit",
+            "--base-url",
+            f"http://127.0.0.1:{mock_comfy.server_address[1]}",
+            "--output-root",
+            str(output_root),
+            *extras,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    combined = (result.stderr + result.stdout).lower()
+    assert "ref-image" in combined
+    assert "at most 9" in combined
+    assert "need 10" not in combined
+    assert not mock_comfy.posted
+    assert mock_comfy.uploads == []
+
+
+def test_ref_image_uses_upload_json_name_not_host_basename(tmp_path, mock_comfy):
+    mock_comfy.upload_name_prefix = "srv-"
+    workflow = tmp_path / "tiny-ref2va-workflow.json"
+    shutil.copy(REPO / "tests/fixtures/tiny-ref2va-workflow.json", workflow)
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    img = tmp_path / "blue.png"
+    img.write_bytes(b"x")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(workflow),
+            "--prompt",
+            "hello",
+            "--seed",
+            "7",
+            "--name",
+            "unit",
+            "--base-url",
+            f"http://127.0.0.1:{mock_comfy.server_address[1]}",
+            "--output-root",
+            str(output_root),
+            "--ref-image",
+            str(img),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    graph = mock_comfy.posted[0]["prompt"]
+    assert graph["24"]["inputs"]["image"] == "srv-blue.png"
+    assert graph["24"]["inputs"]["image"] != img.name
+    assert str(img) not in json.dumps(graph)
+    assert mock_comfy.upload_fields == ["image"]
+
+
+def test_ref_image_fails_without_ref2va_node(tmp_path, mock_comfy):
+    data = json.loads(
+        (REPO / "tests/fixtures/tiny-ref2va-workflow.json").read_text(encoding="utf-8")
+    )
+    del data["10"]
+    workflow = tmp_path / "no-ref2va.json"
+    workflow.write_text(json.dumps(data), encoding="utf-8")
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    img = tmp_path / "blue.png"
+    img.write_bytes(b"x")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(workflow),
+            "--prompt",
+            "hello",
+            "--seed",
+            "7",
+            "--name",
+            "unit",
+            "--base-url",
+            f"http://127.0.0.1:{mock_comfy.server_address[1]}",
+            "--output-root",
+            str(output_root),
+            "--ref-image",
+            str(img),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    combined = (result.stderr + result.stdout).lower()
+    assert result.returncode == 1
+    assert "ref-image" in combined
+    assert "minimaxh3referencetovideo" in combined
+    assert not mock_comfy.posted
+    assert mock_comfy.uploads == []
+
+
+def test_ref_image_fails_with_two_ref2va_nodes(tmp_path, mock_comfy):
+    data = json.loads(
+        (REPO / "tests/fixtures/tiny-ref2va-workflow.json").read_text(encoding="utf-8")
+    )
+    data["99"] = {
+        "class_type": "MiniMaxH3ReferenceToVideo",
+        "inputs": {
+            "prompt": "LOCKED_PLACEHOLDER",
+            "width": 960,
+            "height": 544,
+            "length": 124,
+            "ref_image_size": "match",
+        },
+    }
+    workflow = tmp_path / "two-ref2va.json"
+    workflow.write_text(json.dumps(data), encoding="utf-8")
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    img = tmp_path / "blue.png"
+    img.write_bytes(b"x")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(workflow),
+            "--prompt",
+            "hello",
+            "--seed",
+            "7",
+            "--name",
+            "unit",
+            "--base-url",
+            f"http://127.0.0.1:{mock_comfy.server_address[1]}",
+            "--output-root",
+            str(output_root),
+            "--ref-image",
+            str(img),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "exactly one" in (result.stderr + result.stdout).lower()
+    assert not mock_comfy.posted
+    assert mock_comfy.uploads == []
+
+
+def test_ref_image_deletes_flat_keys_keeps_ref_image_size(tmp_path, mock_comfy):
+    data = json.loads(
+        (REPO / "tests/fixtures/tiny-ref2va-workflow.json").read_text(encoding="utf-8")
+    )
+    data["10"]["inputs"]["ref_image_0"] = ["24", 0]
+    data["10"]["inputs"]["ref_image_1"] = "should-be-removed"
+    workflow = tmp_path / "flat-keys.json"
+    workflow.write_text(json.dumps(data), encoding="utf-8")
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    img0 = tmp_path / "blue.png"
+    img1 = tmp_path / "yellow.png"
+    img0.write_bytes(b"x")
+    img1.write_bytes(b"y")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            str(workflow),
+            "--prompt",
+            "hello",
+            "--seed",
+            "7",
+            "--name",
+            "unit",
+            "--base-url",
+            f"http://127.0.0.1:{mock_comfy.server_address[1]}",
+            "--output-root",
+            str(output_root),
+            "--ref-image",
+            str(img0),
+            "--ref-image",
+            str(img1),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    graph = mock_comfy.posted[0]["prompt"]
+    inputs = graph["10"]["inputs"]
+    assert inputs["ref_image_size"] == "match"
+    assert "ref_image_0" not in inputs
+    assert "ref_image_1" not in inputs
+    assert inputs["ref_images"] == {
+        "ref_image_0": ["24", 0],
+        "ref_image_1": ["25", 0],
+    }
+    assert str(tmp_path / "blue.png") not in json.dumps(graph)
+    assert "/data/" not in graph["24"]["inputs"]["image"]
+    assert "/data/" not in graph["25"]["inputs"]["image"]

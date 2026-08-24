@@ -1,6 +1,9 @@
-diffusion_models/minimax_h3_fl2va_pruned_fp8_scaled.safetensors
+# Default start set = shared + ref2va. Prefer --task.
+# shared
 text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors
 vae/minimax_h3_video_vae_fp16.safetensors
 vae/minimax_h3_audio_vae_fp32.safetensors
-loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors
 upscale_models/2x-spanx2-ch48.pth
+# ref2va (default H3_TASK)
+diffusion_models/minimax_h3_ref2va_pruned_fp8_scaled.safetensors
+loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors

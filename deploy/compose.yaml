@@ -28,3 +28,5 @@ services:
       - ${H3_OUTPUT:-${HOME}/h3-output}:/opt/ComfyUI/output
       - ${H3_DATA:-${HOME}/h3-data}:/data:ro
     restart: unless-stopped
+    environment:
+      H3_TASK: ${H3_TASK:-ref2va}

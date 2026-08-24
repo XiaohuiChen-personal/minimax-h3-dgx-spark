@@ -54,13 +54,13 @@
     <a class="index-card span2" href="design/architecture.html">
       <span class="chip c-m">Design · start here</span>
       <h2>Architecture</h2>
-      <p>Plain-language pipeline: H3 starts from noise, not from words. Five stages, hardware rules, what we ship first.</p>
+      <p>Plain-language pipeline: H3 starts from noise, not from words. Five stages, hardware rules, Ref2VA default.</p>
       <span class="go">Open architecture →</span>
     </a>
     <a class="index-card" href="design/decisions.html">
-      <span class="chip c-m">D-01…D-14</span>
+      <span class="chip c-m">D-01…D-15</span>
       <h2>Decisions</h2>
-      <p>The numbered choices an implementing agent must follow. File names, canvas, length, image base, license gate.</p>
+      <p>The numbered choices an implementing agent must follow. Default generate is Ref2VA (D-15). FL2VA stays selectable.</p>
       <span class="go">Open decisions →</span>
     </a>
     <a class="index-card" href="design/optimizations.html">
@@ -72,7 +72,7 @@
     <a class="index-card" href="design/operator.html">
       <span class="chip c-m">End goal · D-08</span>
       <h2>Operator</h2>
-      <p>SSH in, ask an agent, POST a locked workflow. One GPU job at a time. Attach pictures; do not invent keyframes.</p>
+      <p>SSH in, ask an agent, POST a locked workflow. One GPU job at a time. Identity stills are <code>--ref-image</code> (1–9), not <code>first_frame</code>.</p>
       <span class="go">Open operator →</span>
     </a>
     <a class="index-card" href="design/container.html">
@@ -100,12 +100,12 @@
         <span class="n">02</span><strong>Implement</strong><span class="chip c-m">Shipped</span>
         <span></span><span>Locked workflows, submit/poll scripts, Dockerfile, compose file.</span><span></span>
         <span class="n">03</span><strong>Generate</strong><span class="chip c-m">Recorded</span>
-        <span></span><span>5.17 s smoke and 8.00 s default mp4s on this Spark (stereo). Server must already be up.</span><span></span>
+        <span></span><span>FL2VA 5.17 s / 8.00 s and Ref2VA 5.17 s / 15.08 s mp4s exist on this Spark (<code>~/h3-output/smoke-ref2va-5s17_00001_.mp4</code>, <code>~/h3-output/smoke-ref2va-15s08_00001_.mp4</code>). Default generate remains Ref2VA 8.00 s (4 steps, D-15). Do not commit the mp4s. SaveVideo adds <code>_00001_</code>. Never print <code>/opt/ComfyUI/output</code>. Server must already be up.</span><span></span>
       </div>
     </div>
     <div class="box compute">
       <div class="boxlabel">Locked operating point</div>
-      <p>Generate at <code>960×544</code> for 8.00 s, 8 steps, then 2× SPAN to 1080p. First smoke test: 5.17 s. See <a href="design/decisions.html">decisions</a>.</p>
+      <p>Generate at <code>960×544</code> for 8.00 s, then 2× SPAN to 1080p. Default is <strong>Ref2VA</strong> (4 steps, D-15) plus <code>--ref-image</code> (1–9). Optional long: <strong>15.08 s / 362</strong> (never 15.00 / 15.04). Text-only uses FL2VA (8 steps). First smoke: 5.17 s. See <a href="design/decisions.html">decisions</a>.</p>
     </div>
   </div>
 </section>
