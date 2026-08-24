@@ -18,7 +18,7 @@ SSH into this DGX Spark, ask an agent to generate, get an mp4. ComfyUI stays up 
 
 Public repo: `XiaohuiChen-personal/minimax-h3-dgx-spark`. Pages: https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/
 
-**Status:** research and design are filled. Workflows, scripts, and the Docker image are **not implemented yet**. Until they exist, do not pretend a generate button works.
+**Status:** ComfyUI image (`h3-spark:local`) and locked graphs exist. Generate via `scripts/submit-prompt.sh` and poll `/history/<id>`. Do not invent a new process.
 
 ## Hardware and Python traps
 

@@ -1,8 +1,8 @@
 # Container — build it and start it
 
-This page is what an implementing agent follows to write `deploy/Dockerfile` and `deploy/compose.yaml`, and what a human follows to run the image on a DGX Spark.
+This page is the contract for the shipped `deploy/Dockerfile` and `deploy/compose.yaml`, and what a human or agent follows to run the image on a DGX Spark.
 
-The image is **not written yet**. Do not copy a random ComfyUI image from the internet and call it done. The image must match [`decisions.md`](decisions.md).
+The image **exists** (`h3-spark:local`). Pins and start commands live in [`../deploy/README.md`](../deploy/README.md). Do not copy a random ComfyUI image from the internet. The image must match [`decisions.md`](decisions.md).
 
 ## What you are building
 
@@ -22,7 +22,7 @@ Spark host
   ~/h3-output    ──rw──►  /opt/ComfyUI/output
   ~/h3-data      ──ro──►  /data          (optional first/last-frame pictures)
 
-docker compose up  →  ComfyUI :8188  →  agent POST /prompt  →  ~/h3-output/*.mp4
+docker compose -f deploy/compose.yaml up -d  →  ComfyUI :8188  →  agent POST /prompt  →  ~/h3-output/*.mp4
 ```
 
 ## What the image contains vs what it must not
@@ -37,7 +37,7 @@ docker compose up  →  ComfyUI :8188  →  agent POST /prompt  →  ~/h3-output
 
 ## Host folder layout
 
-Create this tree **before** the first `compose up`. The download script (next implementation step) should create it.
+Create this tree **before** the first `compose up`. `./scripts/download-weights.sh "$HOME/h3-weights"` creates it; `./scripts/check-weights.sh` verifies it.
 
 ```text
 ~/h3-weights/
@@ -62,11 +62,11 @@ The entrypoint checks those **MiniMax** paths. If any file is missing, it prints
 
 `~/h3-output` and `~/h3-data` may start empty.
 
-## Dockerfile contract (what to write later)
+## Dockerfile contract (shipped in `deploy/Dockerfile`)
 
-Implement in `deploy/Dockerfile`. Do not put the file in `docs/`.
+Implemented in `deploy/Dockerfile`. Do not put the file in `docs/`.
 
-1. `FROM` the NGC PyTorch tag chosen at implement time (D-09). Platform `linux/arm64`.
+1. `FROM` the NGC PyTorch tag pinned in [`../deploy/README.md`](../deploy/README.md) (D-09). Platform `linux/arm64`.
 2. Confirm inside the build, or in a documented first-run check, that `python -c "import torch; assert torch.cuda.is_available()"`.
 3. Clone ComfyUI at the pinned SHA (D-11) into `/opt/ComfyUI`.
 4. Install Python deps with the **image’s** Python, never `/usr/bin/python3` from the Spark host.
@@ -102,14 +102,16 @@ Sage is a **package + workflow path**, not that flag.
 
 ## Compose contract
 
-Implement in `deploy/compose.yaml`:
+Shipped in `deploy/compose.yaml`. `build.context` is the **repository root** so `COPY workflows` and `COPY scripts` work. Invoke from the repo root — see [`../deploy/README.md`](../deploy/README.md). Do not `cd deploy` and `build: .`.
 
 ```yaml
-# Shape only — write the real file at implement time.
+# Real file: deploy/compose.yaml (pins and build.args live there).
 services:
   comfyui:
     image: h3-spark:local
-    build: .
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
     gpus: all
     ports:
       - "8188:8188"
@@ -150,21 +152,20 @@ cd minimax-h3-dgx-spark
 
 ### 2. Download weights onto the host
 
-After the download script exists:
-
 ```bash
 mkdir -p "$HOME/h3-weights" "$HOME/h3-output" "$HOME/h3-data"
 ./scripts/download-weights.sh "$HOME/h3-weights"
 ./scripts/check-weights.sh "$HOME/h3-weights"
 ```
 
-Until that script exists, download the D-02 files by hand from Comfy-Org/MiniMax-H3 into the tree above. Do not commit them. Do not put them in the image.
+Do not commit the weights. Do not put them in the image.
 
 ### 3. Build the image
 
+From the repository root (compose `build.context` is `..`). Exact pins: [`../deploy/README.md`](../deploy/README.md).
+
 ```bash
-cd deploy
-docker compose build
+docker compose -f deploy/compose.yaml build
 ```
 
 Expect a long first build (PyTorch base + ComfyUI + Sage wheel). The image should stay well under the weight set in size. If the build is ~50 GiB, weights were baked in — that is a bug.
@@ -172,13 +173,13 @@ Expect a long first build (PyTorch base + ComfyUI + Sage wheel). The image shoul
 ### 4. Start the server once
 
 ```bash
-docker compose up -d
-docker compose logs -f
+docker compose -f deploy/compose.yaml up -d
+docker compose -f deploy/compose.yaml logs -f
 ```
 
 Wait until ComfyUI prints that it is listening on 8188. The first start may take several minutes while it maps files. Leave it up. **Do not restart it for every video.**
 
-Health check (after the helper exists, or with curl):
+Health check:
 
 ```bash
 curl -sS http://127.0.0.1:8188/system_stats
@@ -204,7 +205,7 @@ A second submit while the first is running should **queue**, not crash, and not 
 ### 6. Stop (only when you mean to free the GPU)
 
 ```bash
-cd deploy && docker compose down
+docker compose -f deploy/compose.yaml down
 ```
 
 Stopping unloads the ~40 GiB of weights. The next start pays that cost again.
@@ -226,18 +227,11 @@ docker run --gpus all --name h3-comfy \
 
 Prefer Compose so the mounts stay consistent.
 
-## What the implementing agent writes next
+## What is left
 
-In this order, in a later session:
+The image, compose file, weight scripts (`download-weights.sh`, `check-weights.sh`), locked workflows, `submit-prompt.sh`, `smoke-test.sh`, and `deploy/README.md` are already in the tree. Do not rewrite them from a pre-implementation sketch.
 
-1. `scripts/download-weights.sh` — `hf download` into the host tree (not `huggingface-cli`; that binary is not on this Spark). No tokens in the file. Never `--include "*.safetensors"` on Comfy-Org/MiniMax-H3 (that is the 471 G snapshot).
-2. `scripts/check-weights.sh` — exit 1 with a file list if anything required is missing.
-3. `workflows/h3-fl2va-smoke-5s17.json` and `workflows/h3-fl2va-default-8s.json` — see [`../workflows/README.md`](../workflows/README.md).
-4. `scripts/submit-prompt.sh` — patch free fields, `POST /prompt`, poll `/history`.
-5. `scripts/smoke-test.sh` — submit the 5.17 s graph; fail if the mp4 has no audio stream.
-6. `deploy/Dockerfile` + `deploy/compose.yaml` + a short `deploy/README.md` that points here.
-
-Do not start those files with a different model, canvas, or serving stack.
+What remains after Task 11’s implementer commit is **parent close-out**: spec review → adversarial review and fix → re-smoke → `git push` (never force). Do not invent a different model, canvas, or serving stack.
 
 ## What this image is not
 
