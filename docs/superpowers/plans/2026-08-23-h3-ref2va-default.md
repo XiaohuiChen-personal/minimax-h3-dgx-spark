@@ -21,7 +21,7 @@
 - Work on feature branch **`feat/h3-ref2va-default`**. Do not implement Tasks 1–9 on `main`. Push with `git push -u origin HEAD` (never `--force`).
 - One GPU job at a time. Do not start or restart ComfyUI except Task 7 (image rebuild / `H3_TASK` start). Tasks 1–6 must not `docker compose down` / `up` / `restart` / `kill`. Tasks 8–9 must not restart. If Task 7/8/9 find the GPU busy with a leftover job, they may `POST /interrupt` or stop a **non-ComfyUI** leftover process. They must not start a second ComfyUI.
 - Legal Ref2VA lengths in this plan: **5.17 s / 124**, **8.00 s / 192** (D-07 default), **15.08 s / 362**. Snap “15 s” / “15.04 s” to **15.08 s / 362**. Never invent **15.00** or **15.04** graphs. D-07 rejected 15.08 as the everyday default — keep `h3-ref2va-default-8s.json` as the generate default.
-- All locked Ref2VA graphs (smoke, default, **and** 15.08) ship six `LoadImage` nodes titled `ref_image_0` … `ref_image_5`. Live Task 8 and Task 9 smokes use the operator’s **six** stills (two birds × three views), not a composite 3-view sheet.
+- All locked Ref2VA graphs (smoke, default, **and** 15.08) ship nine `LoadImage` nodes titled `ref_image_0` … `ref_image_8`. Live Task 8 and Task 9 smokes still use the operator’s **six** stills (two birds × three views; N=6 of 9 slots), not a composite 3-view sheet. Submit wires only the first N `--ref-image` flags. Do not claim unbounded N (live `MiniMaxH3ReferenceToVideo` autogrow and submit max are 9; 10+ stay fail-close).
 - Every task ends with **Parent close-out** (spec reviewer → fixer if needed → adversarial reviewer **and fixer** → re-smoke → push). Do not weaken that to “reviewer only.”
 - Mount scheme stays subfolder binds. New DiT/LoRA files go into the existing `diffusion_models` and `loras` binds — no new volume for weights.
 - Hugging Face: `hf download Comfy-Org/MiniMax-H3 <repo-relative-path> --local-dir DIR`. Never `huggingface-cli`. Never `--local-dir-use-symlinks`. Never `--include "*.safetensors"` on that repo.
@@ -68,9 +68,9 @@ ComfyUI does **not** load a DiT at process start. “Default Ref2VA at start” 
 | `scripts/entrypoint.sh` | `check-weights.sh /opt/ComfyUI/models --task "${H3_TASK:-ref2va}"` then the same ComfyUI argv |
 | `scripts/submit-prompt.py` | `--ref-image` (repeatable, max 9): upload + LoadImage filename + nested `ref_images` |
 | `scripts/smoke-test.sh` | Optional `--workflow`; default Ref2VA 5.17 s graph |
-| `workflows/h3-ref2va-smoke-5s17.json` | 960×544, length 124, 4 steps, Ref2VA |
-| `workflows/h3-ref2va-default-8s.json` | 960×544, length 192, 4 steps, Ref2VA (D-07 default generate) |
-| `workflows/h3-ref2va-long-15s08.json` | 960×544, length **362**, 4 steps, Ref2VA (15.08 s; not the default) |
+| `workflows/h3-ref2va-smoke-5s17.json` | 960×544, length 124, 4 steps, Ref2VA; nine `LoadImage` titles `ref_image_0`…`ref_image_8` |
+| `workflows/h3-ref2va-default-8s.json` | 960×544, length 192, 4 steps, Ref2VA (D-07 default generate); nine titles |
+| `workflows/h3-ref2va-long-15s08.json` | 960×544, length **362**, 4 steps, Ref2VA (15.08 s; not the default); nine titles |
 | `workflows/h3-fl2va-*.json` | Unchanged product graphs |
 | `tests/unit/test_check_weights.sh` | Shared / task / missing-file fixtures |
 | `tests/unit/test_workflow_lock.py` | Split FL2VA vs Ref2VA forbidden strings |
@@ -166,7 +166,9 @@ An 80 px bottom crop (`ih-80` → height 944) keeps every bird. Tightest leftove
 | One composite 3-view sheet, one `--ref-image` | Fewer uploads | Operator forbade this as the **primary** smoke. Loses per-view `<Picture N>` control. |
 | Two LoadImage nodes (one bird) | Smaller | Cannot prove two-identity wiring. |
 
-**Chosen:** titles `ref_image_0`…`ref_image_5` on **all three** Ref2VA JSONs. Do **not** commit a `ref_images` dict (submit writes the nested dict).
+**Chosen (smoke recipe, still in force):** Task 8/9 use six `--ref-image` flags and the six host files below. Default prompts still document `<Picture 1>`…`<Picture 6>`. Do **not** commit a `ref_images` dict (submit writes the nested dict).
+
+**Title count superseded by J:** the product lock is nine slots (`ref_image_0`…`ref_image_8`), not six. C is the six-bird smoke, not the graph ceiling.
 
 **`--ref-image` / `<Picture N>` order** (1-based tags = upload order = title suffix + 1). Confirmed against pixels, not chat captions:
 
@@ -254,6 +256,32 @@ Outputs live under `$HOME/h3-data/*.jpg` only. Never git-add them. Prompts still
 | Restart whenever the GPU looks busy | Simple | Reloads weights. Violates D-08. |
 
 **Chosen:** the Global Constraints bullet above. `POST http://127.0.0.1:8188/interrupt` if a leftover **ComfyUI** job holds the GPU. Stop a non-ComfyUI leftover process if that is what is busy. Never start a second ComfyUI.
+
+### J. Variable reference-image count
+
+Real apps have undetermined N. The live node does not: `GET /object_info/MiniMaxH3ReferenceToVideo` autogrow is **0–9** (`ref_image_` prefix). `submit-prompt.py` already hard-caps `--ref-image` at 9. **10+ stay fail-close.** Do not claim unbounded N.
+
+Audit (`.superpowers/sdd/ref-image-count-audit.md`, 2026-08-23): leftover unlinked `LoadImage` nodes stay `example.png`, are omitted from the nested `ref_images` dict, and are **not** in the SaveVideo DAG — they do not execute and do not condition the video.
+
+| Option | Pros | Cons |
+|---|---|---|
+| **B. Ship 9 titles (`ref_image_0`…`ref_image_8`) on all three graphs** | Matches the node max and Task 3’s `ref_image_0`…`ref_image_8` interface. Submit already wires 1–N without inventing nodes. Unused extras are the same class as today’s unused `ref_image_3`…`5` when N=3. | Three idle `LoadImage` nodes in each JSON. |
+| A. Keep 6 titles; fail-close at 7–9 | Already shipped with Task 4 | Node-legal 7–9 stills need a JSON edit. Freezes the six-bird smoke as the product cap. |
+| C. Dynamically inject `LoadImage` nodes in submit when N > titles | No JSON edit for 7–9 | Invents DAG nodes. Conflicts with “fill a **locked** graph.” Task 3 already fail-closes instead of growing. More moving parts. |
+| D. Unbounded N | — | **False.** Autogrow `max: 9`. Submit `MAX_REF_IMAGES = 9`. |
+
+**Chosen: B.** Reject D. Reject C unless a proven bug in B (none found).
+
+| When | Graph titles | What submit does |
+|---|---|---|
+| Pre-this-change | 6 (`ref_image_0`…`ref_image_5`, nodes `24`–`29`) | 1–6 wire. **7–9 fail-close** (not enough titles). 10+ fail-close at the cap. |
+| After this change | 9 (`ref_image_0`…`ref_image_8`, nodes `24`–`32`) | Wires only the first N nested keys. Leftover `LoadImage`s stay unlinked `example.png` and are **not** in the SaveVideo DAG. 10+ still fail-close. |
+
+Zero refs: still POST without a `ref_images` dict (existing Task 3 behavior: omit `--ref-image`). That is node-legal, not a proven identity generate. **Identity tasks should pass ≥1 `--ref-image`.** 0 identity stills → submit an FL2VA graph, not 0-ref Ref2VA.
+
+`<Picture N>` is **1-based** and matches `--ref-image` order for whatever N was passed (1–9). Write `<Picture 1>`…`<Picture N>` only. Tags for k > N are empty theater (no leftover `example.png` pixels).
+
+Task 6 docs / `AGENTS.md` must say **variable 1–9**, not “six only” / “this product locks 6 LoadImage titles.” Task 8/9 smokes still use the six bird stills (N=6 of 9 slots). Do not require 9 stills for smoke. Default committed prompts may keep `<Picture 1>`…`<Picture 6>` as that smoke example; lock tests must **not** require `<Picture 9>`.
 
 ---
 
@@ -759,7 +787,7 @@ Then parent close-out (copy **Parent close-out**).
 
 **Interfaces:**
 - Consumes: `workflows/h3-fl2va-default-8s.json` as the structural template (same Sage / Sol-Attn / FBC / SPAN / SaveVideo chain)
-- Produces: **three** API-format Ref2VA graphs. Smoke `length=124`, default `length=192`, long `length=362`. All three: width 960, height 544, steps 4, Ref2VA FP8 UNET, Ref2V 4-step LoRA, `MiniMaxH3ReferenceToVideo` with `audio_vae` linked to the audio VAE loader, `ref_image_size=match`, six `LoadImage` nodes titled `ref_image_0` … `ref_image_5` (so six `--ref-image` flags work without editing JSON). Do **not** put a `ref_images` dict in the committed JSON (0 refs until submit wires it). Default prompt documents `<Picture 1>` … `<Picture 6>` in the locked blue-then-yellow front/side/back order.
+- Produces: **three** API-format Ref2VA graphs. Smoke `length=124`, default `length=192`, long `length=362`. All three: width 960, height 544, steps 4, Ref2VA FP8 UNET, Ref2V 4-step LoRA, `MiniMaxH3ReferenceToVideo` with `audio_vae` linked to the audio VAE loader, `ref_image_size=match`, nine `LoadImage` nodes titled `ref_image_0` … `ref_image_8` (so **1–9** `--ref-image` flags work without editing JSON). Do **not** put a `ref_images` dict in the committed JSON (0 refs until submit wires it). Default prompt documents `<Picture 1>` … `<Picture 6>` in the locked blue-then-yellow front/side/back order (the six-bird smoke example; graphs accept up to nine stills).
 
 - [ ] **Step 1: Write lock tests first**
 
@@ -820,7 +848,7 @@ def test_ref2va_smoke_default_and_long():
             for node in prompt_graph(g).values()
             if node.get("class_type") == "LoadImage"
         ]
-        assert titles == [f"ref_image_{i}" for i in range(6)]
+        assert titles == [f"ref_image_{i}" for i in range(9)]
         ref2va_nodes = [
             node
             for node in prompt_graph(g).values()
@@ -924,7 +952,7 @@ Long node `10`:
 }
 ```
 
-5. Add LoadImage nodes `24`–`29` to **every** Ref2VA file (unlinked until `submit-prompt.py` writes `ref_images`):
+5. Add LoadImage nodes `24`–`32` to **every** Ref2VA file (unlinked until `submit-prompt.py` writes `ref_images`; leftover titles after N stills stay `example.png` and out of the SaveVideo DAG):
 
 ```json
 "24": {
@@ -955,6 +983,21 @@ Long node `10`:
 "29": {
   "class_type": "LoadImage",
   "_meta": { "title": "ref_image_5" },
+  "inputs": { "image": "example.png" }
+},
+"30": {
+  "class_type": "LoadImage",
+  "_meta": { "title": "ref_image_6" },
+  "inputs": { "image": "example.png" }
+},
+"31": {
+  "class_type": "LoadImage",
+  "_meta": { "title": "ref_image_7" },
+  "inputs": { "image": "example.png" }
+},
+"32": {
+  "class_type": "LoadImage",
+  "_meta": { "title": "ref_image_8" },
   "inputs": { "image": "example.png" }
 }
 ```
@@ -1246,7 +1289,7 @@ Replace the “Pick a locked workflow” table **and** the sentence `Do not add 
 Snap “15 s” / “15.04 s” to **15.08 s / 362**. Never invent **15.00** or **15.04**. If they say “10 seconds,” snap to **10.13 s** or refuse. Never invent **10.00 s**. There is no locked 10.13 s JSON in this repo — refuse or ask them to accept 8.00 s.
 ```
 
-Add `--ref-image` to the inputs table (optional, host files, uploaded via `POST /upload/image`, max 9, this product locks 6 LoadImage titles). State that identity stills are Ref2VA `--ref-image` + `<Picture N>` tags, **not** `first_frame`. Do not write `<Picture N>` on FL2VA graphs.
+Add `--ref-image` to the inputs table (optional, host files, uploaded via `POST /upload/image`, **variable 1–9**; this product ships nine `LoadImage` titles `ref_image_0`…`ref_image_8`. Do **not** say “six only.” 10+ refuse. 0 refs → FL2VA, not 0-ref Ref2VA). State that identity stills are Ref2VA `--ref-image` + 1-based `<Picture N>` tags in `--ref-image` order, **not** `first_frame`. Do not write `<Picture N>` on FL2VA graphs. Task 8/9 smokes still use the six bird stills (N=6).
 
 - [ ] **Step 3: Update the other markdown files listed above**
 
@@ -1627,7 +1670,7 @@ If nothing changed in git, do not create an empty commit. Then parent close-out 
 |---|---|
 | Default start = Ref2VA weights | 1, 5, 7 |
 | User can still specify FL2VA | 2 (`--task all`), 4 (graphs kept), 5 (`H3_TASK=fl2va`), 6 (docs), 8 (validation) |
-| Six identity stills + `<Picture N>` | 3 (`--ref-image`), 4 (six LoadImage titles on all three graphs), 6 (AGENTS), 8–9 (live) |
+| Variable **1–9** identity stills + `<Picture N>` (smoke uses N=6) | 3 (`--ref-image`, max 9), 4 (nine LoadImage titles on all three graphs), 6 (AGENTS says 1–9), 8–9 (live six-bird recipe) |
 | Nested autogrow only | 3 tests + feasibility table |
 | No first_frame-as-3view | 6, Global Constraints, Operator amendment C |
 | Same canvas / kernels / no NVFP4 / 4-step Ref2VA | 4 lock tests |
