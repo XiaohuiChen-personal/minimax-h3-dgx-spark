@@ -81,19 +81,19 @@
       <text x="472" y="74" text-anchor="middle" class="dhead">3 Pack</text>
       <text x="472" y="96" text-anchor="middle" class="dlabel-s">one long list</text>
       <rect x="580" y="28" width="180" height="104" rx="8" class="dbox-hot"/>
-      <text x="670" y="74" text-anchor="middle" class="dhead">4 Clean ×8</text>
+      <text x="670" y="74" text-anchor="middle" class="dhead">4 Clean</text>
       <text x="670" y="96" text-anchor="middle" class="dlabel-s">almost all the time</text>
       <rect x="788" y="40" width="176" height="80" rx="8" class="dbox-cold"/>
       <text x="876" y="74" text-anchor="middle" class="dhead">5 Grow</text>
       <text x="876" y="96" text-anchor="middle" class="dlabel-s">VAE + SPAN → mp4</text>
     </svg>
-    <figcaption>Only stage 4 repeats. Text and optional keyframe pictures are written once and then only read.</figcaption>
+    <figcaption>Only stage 4 repeats (Ref2VA 4 times, FL2VA 8 times). Text and optional identity stills are written once and then only read.</figcaption>
   </figure>
   <ol>
-    <li><strong>Read the request.</strong> Qwen3-VL-32B turns your words into numbers. It does not write the video. If you attach a first or last photo, it also looks at that photo.</li>
-    <li><strong>Shrink.</strong> Two small networks (VAEs) compress pictures and sound so the big model can chew them. If you attached photos, the video VAE also compresses them. It does not invent them.</li>
-    <li><strong>Pack.</strong> Text, optional keyframes, video noise, and audio noise sit in one list. Conditioning is other rows in that list, not a side door.</li>
-    <li><strong>Clean the noise eight times.</strong> A 33-billion-parameter model guesses what is still noise. Video and sound use two different clocks — that is why ComfyUI must be new enough for <code>ModelSamplingAV</code>.</li>
+    <li><strong>Read the request.</strong> Qwen3-VL-32B turns your words into numbers. It does not write the video. Default Ref2VA also reads 1–9 identity stills (<code>--ref-image</code>).</li>
+    <li><strong>Shrink.</strong> Two small networks (VAEs) compress pictures and sound so the big model can chew them. Attached stills are compressed, not invented.</li>
+    <li><strong>Pack.</strong> Text, optional identity stills, video noise, and audio noise sit in one list. Conditioning is other rows in that list, not a side door.</li>
+    <li><strong>Clean the noise.</strong> Default Ref2VA does this <strong>4 times</strong> (official Ref2V Turbo). Selectable FL2VA does it <strong>8 times</strong>. Video and sound use two different clocks — that is why ComfyUI must be new enough for <code>ModelSamplingAV</code>.</li>
     <li><strong>Grow back.</strong> VAEs expand to frames and stereo. SPAN doubles 960×544 to 1920×1088. Crop 8 rows to 1080p. Write the mp4.</li>
   </ol>
 </section>
@@ -114,14 +114,26 @@
 </section>
 
 <section>
-  <div class="shead"><span class="snum">05</span><h2>What we ship first</h2></div>
-  <ul>
-    <li>Text-to-video, or first/last-frame pictures on the same graph (FL2VA)</li>
-    <li>960×544 → SPAN → 1080p</li>
-    <li>8.00 s everyday, 5.17 s smoke test</li>
-    <li>One GPU job, local SSH</li>
+  <div class="shead"><span class="snum">05</span><h2>What we ship</h2></div>
+  <p class="sdek">Ref2VA is the default generate path. FL2VA stays the text-only pair. Do not claim a live Ref2VA mp4 exists yet.</p>
+  <div class="scroller">
+    <table>
+      <thead><tr><th>Role</th><th>File</th><th>Length</th></tr></thead>
+      <tbody>
+        <tr><td>Fast smoke</td><td class="k">h3-ref2va-smoke-5s17.json</td><td>5.17 s / 124</td></tr>
+        <tr><td>Default generate</td><td class="k">h3-ref2va-default-8s.json</td><td>8.00 s / 192</td></tr>
+        <tr><td>Long (optional)</td><td class="k">h3-ref2va-long-15s08.json</td><td><strong>15.08 s / 362</strong></td></tr>
+        <tr><td>Text-only 8 s</td><td class="k">h3-fl2va-default-8s.json</td><td>8.00 s / 192</td></tr>
+        <tr><td>Text-only smoke</td><td class="k">h3-fl2va-smoke-5s17.json</td><td>5.17 s / 124</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <ul style="margin-top:16px">
+    <li>Identity stills: <code>--ref-image</code>, variable <strong>1–9</strong>, uploaded. 3-view sheets are this path, not <code>first_frame</code>.</li>
+    <li>960×544 → SPAN → 1080p. One GPU job, local SSH.</li>
+    <li>Snap “15 s” / “15.04 s” to <strong>15.08</strong>. Never invent 15.00 / 15.04. 15.08 is not the everyday default.</li>
   </ul>
-  <p style="margin-top:14px">Not first: Ref2VA, native 1080p, the closed 2K path, a public website, vLLM-Omni.</p>
+  <p style="margin-top:14px">Not first: native 1080p, the closed 2K path, a public website, vLLM-Omni, 0-ref Ref2VA as an identity generate.</p>
 </section>
 
 <p class="foot">Working source: <code>design/architecture.md</code>. Numbers and file names: <a href="decisions.html">Decisions</a>. Speed-ups: <a href="optimizations.html">Optimizations</a>. How to run it: <a href="operator.html">Operator</a> · <a href="container.html">Container</a>.</p>

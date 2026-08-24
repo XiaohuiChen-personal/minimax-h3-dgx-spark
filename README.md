@@ -16,7 +16,7 @@ This repository does **not** host model weights.
 | Design | End-to-end contract an agent can implement | Filled in |
 | Implement | Workflows, scripts, Dockerfile | Shipped (`h3-spark:local`, locked graphs) |
 
-**Locked operating point:** generate at `960×544` for **8.00 s** (192 frames), 8 steps, then 2× SPAN to `1920×1088` and crop to 1080p. First smoke test: **5.17 s**.
+**Locked operating point:** generate at `960×544` for **8.00 s** (192 frames), then 2× SPAN to `1920×1088` and crop to 1080p. **Default generate is Ref2VA** (4 steps, D-15). First smoke: **5.17 s**. Optional long: **15.08 s / 362** (never 15.00 / 15.04). Text-only / no identity images uses the FL2VA pair (8 steps).
 
 Site: **https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/**
 
@@ -42,19 +42,21 @@ cd minimax-h3-dgx-spark
 # Host trees (D-14). download-weights.sh creates the weight subfolders.
 mkdir -p "$HOME/h3-output" "$HOME/h3-data"
 # Needs the `hf` CLI (huggingface_hub). Do not use huggingface-cli.
-./scripts/download-weights.sh "$HOME/h3-weights"
-./scripts/check-weights.sh "$HOME/h3-weights"
+./scripts/download-weights.sh "$HOME/h3-weights" --task all
+./scripts/check-weights.sh "$HOME/h3-weights" --task all
 
 # From the repository root — compose build.context is `..`
 docker compose -f deploy/compose.yaml build
 docker compose -f deploy/compose.yaml up -d
 curl -fsS http://127.0.0.1:8188/system_stats
 
-# Default 8.00 s / 192 frames. Leave ComfyUI up; do not restart per video.
-./scripts/submit-prompt.sh workflows/h3-fl2va-default-8s.json \
-  --prompt "A quiet kitchen, morning light, a glass of water on the table." \
+# Default generate: Ref2VA 8.00 s / 192 frames. Leave ComfyUI up; do not restart per video.
+# Repeat --ref-image 1–9 times. Identity stills are not first_frame.
+./scripts/submit-prompt.sh workflows/h3-ref2va-default-8s.json \
+  --prompt "<Picture 1> is the front of the subject. A quiet scene. Stereo room tone. No speech." \
   --seed 42 \
-  --name default-8s
+  --name default-8s \
+  --ref-image "$HOME/h3-data/blue-front.jpg"
 ```
 
 SaveVideo writes `$HOME/h3-output/<name>_00001_.mp4`. Do not set `H3_LICENSE_ACK`. If a bind mount is empty, put absolute `H3_WEIGHTS` / `H3_OUTPUT` / `H3_DATA` in `deploy/.env` (paths only; no tokens).
@@ -67,7 +69,7 @@ First `compose build` compiles SageAttention 2.2 and torchaudio from source. The
 docs/         GitHub Pages: hub, briefing, design pages.
 design/       Source of truth (markdown).
 deploy/       Dockerfile, compose.yaml, start pins.
-workflows/    Locked ComfyUI graphs (5.17 s smoke, 8.00 s default).
+workflows/    Five locked ComfyUI graphs (FL2VA pair + Ref2VA 5.17 / 8.00 / 15.08).
 scripts/      Download, check-weights, submit/poll, smoke-test, entrypoint.
 ```
 
@@ -84,10 +86,19 @@ design/*.md  ──already locked──►  docs/design/*.html
 ```
 
 1. Do **not** invent a different model, canvas, or serving stack.
-2. Use the two locked workflows and the scripts in [`scripts/README.md`](scripts/README.md). Do not add a third graph.
+2. Use the five locked graphs and the scripts in [`scripts/README.md`](scripts/README.md). Default generate is `workflows/h3-ref2va-default-8s.json`. ~15 s uses `workflows/h3-ref2va-long-15s08.json` (**15.08 s / 362**). Text-only / no identity images uses the FL2VA pair. Do not add a sixth graph.
+
+| User ask | File | Length |
+|---|---|---|
+| Default / “about 8 seconds” | `workflows/h3-ref2va-default-8s.json` | **8.00 s / 192** |
+| Fast smoke / “about 5 seconds” | `workflows/h3-ref2va-smoke-5s17.json` | **5.17 s / 124** |
+| “15 seconds” / “15.04 s” / “about 15 seconds” | `workflows/h3-ref2va-long-15s08.json` | **15.08 s / 362** |
+| Text-only / no identity images, about 8 seconds | `workflows/h3-fl2va-default-8s.json` | **8.00 s / 192** |
+| Text-only fast smoke | `workflows/h3-fl2va-smoke-5s17.json` | **5.17 s / 124** |
+
 3. Build and start from [`deploy/README.md`](deploy/README.md): `docker compose -f deploy/compose.yaml up -d` from the **repository root**. Do not `cd deploy` and run a bare `docker compose up`.
-4. On the Spark: download weights into `~/h3-weights` **subfolders**, then start once. Leave ComfyUI up.
-5. If ComfyUI is already up on 8188: smoke 5.17 s, then the 8.00 s default. SaveVideo writes `~/h3-output/<name>_00001_.mp4`, not `<name>.mp4`.
+4. On the Spark: download weights into `~/h3-weights` **subfolders** (`download-weights.sh --task all`), then start once (`H3_TASK=ref2va`). Leave ComfyUI up.
+5. If ComfyUI is already up on 8188: default generate is Ref2VA 8.00 s with `--ref-image` (variable 1–9). SaveVideo writes `~/h3-output/<name>_00001_.mp4`, not `<name>.mp4`. Do **not** claim a live Ref2VA mp4 exists yet.
 
 vLLM-Omni is a later option, not the first path ([D-01](design/decisions.md#d-01--comfyui-first)).
 
@@ -111,6 +122,7 @@ Full cards: [`design/decisions.md`](design/decisions.md).
 | D-12 | Sage 2.2 + Sol-Attn `triton_ref` + FBC H3 Safe | Adopted for implementation |
 | D-13 | Do not gate start on a license flag; operator accepts the risk | Adopted |
 | D-14 | Compose file and `~/h3-weights` / `~/h3-output` | Adopted |
+| D-15 | Ref2VA is the default generate task; FL2VA stays selectable; `--ref-image` is 1–9 | Adopted for implementation |
 
 ## License note
 

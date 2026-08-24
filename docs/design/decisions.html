@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Standing decisions D-01 to D-14 for MiniMax H3 on DGX Spark.">
+<meta name="description" content="Standing decisions D-01 to D-15 for MiniMax H3 on DGX Spark.">
 <title>Decisions — MiniMax H3 on DGX Spark</title>
 <link rel="stylesheet" href="../assets/site.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -29,7 +29,7 @@
 <header class="top">
   <div class="wrap">
     <div class="eyebrow">
-      <span>Design</span><span>D-01…D-14</span><span>Build these</span>
+      <span>Design</span><span>D-01…D-15</span><span>Build these</span>
     </div>
     <h1>Standing decisions</h1>
     <p class="standfirst">
@@ -142,6 +142,39 @@
     <div class="adr">
       <header><span class="id">D-14</span><h3>Compose names and host folders</h3><span class="status s-adopt">adopted</span></header>
       <div class="inner"><p><code>deploy/compose.yaml</code>, image <code>h3-spark:local</code>, weights <code>~/h3-weights</code>, output <code>~/h3-output</code>, pictures <code>~/h3-data</code>, port 8188.</p></div>
+    </div>
+
+    <div class="adr">
+      <header><span class="id">D-15</span><h3>Ref2VA is the default generate task</h3><span class="status s-adopt">adopted for implementation</span></header>
+      <div class="inner">
+        <div class="scroller">
+          <table>
+            <thead><tr><th>Role</th><th>File</th></tr></thead>
+            <tbody>
+              <tr><td>DiT</td><td class="k">minimax_h3_ref2va_pruned_fp8_scaled</td></tr>
+              <tr><td>4-step LoRA</td><td class="k">minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16</td></tr>
+              <tr><td>TE / VAEs / SPAN</td><td>unchanged D-02 / D-04</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Sampler: Euler + simple, <strong>4 steps</strong> (5 sigma points), shifts 6 / 3, 960×544, SPAN 2×. Official Ref2V Turbo is 4-step. Do not strap the FL2V 8-step LoRA onto Ref2VA.</p>
+        <div class="scroller">
+          <table>
+            <thead><tr><th>Role</th><th>File</th><th>Length</th></tr></thead>
+            <tbody>
+              <tr><td>Fast smoke</td><td class="k">h3-ref2va-smoke-5s17.json</td><td>5.17 s / 124</td></tr>
+              <tr><td>Default generate</td><td class="k">h3-ref2va-default-8s.json</td><td>8.00 s / 192</td></tr>
+              <tr><td>Long (optional)</td><td class="k">h3-ref2va-long-15s08.json</td><td><strong>15.08 s / 362</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <dl class="rec">
+          <dt>Select FL2VA</dt><dd>Pass <code>h3-fl2va-default-8s.json</code> (or the 5.17 s smoke) to <code>submit-prompt.sh</code>. Start gate: <code>H3_TASK=fl2va</code> then recreate. Downloader defaults to <code>--task all</code>.</dd>
+          <dt>Select ~15 s</dt><dd>Pass <code>h3-ref2va-long-15s08.json</code>. Snap “15 s” / “15.04 s” to <strong>15.08</strong>. Never invent 15.00 / 15.04. Not the default.</dd>
+          <dt>Refs</dt><dd>Variable <strong>1–9</strong> (<code>ref_image_0</code>…<code>ref_image_8</code>). Host files, <code>POST /upload/image</code>. Leftover LoadImages stay unlinked <code>example.png</code>. 10+ fail-close. 0 refs → FL2VA. 3-view sheets are this path, not <code>first_frame</code>. Six-bird smokes are N=6 of 9.</dd>
+          <dt>Not</dt><dd><code>first_frame</code> for 3-view sheets. Composite sheet as primary smoke. 15.00 / 15.04 graphs. FL2V LoRA on Ref2VA. 15.08 as the D-07 default. Live Ref2VA mp4 is not claimed yet.</dd>
+        </dl>
+      </div>
     </div>
 
   </div>

@@ -34,7 +34,7 @@ Nested `${H3_WEIGHTS:-${HOME}/h3-weights}` needs Compose v2 and `HOME` in the en
 
 ## Start (no license env flag — D-13)
 
-Weights must already be on the host (`./scripts/check-weights.sh "$HOME/h3-weights"`). The entrypoint starts if those files exist. Do not set `H3_LICENSE_ACK`.
+Weights must already be on the host (`./scripts/check-weights.sh "$HOME/h3-weights" --task all` after a `--task all` pull). Default start (`H3_TASK=ref2va`) requires **shared + Ref2VA**. FL2VA files may stay on disk so that graph is selectable. The entrypoint starts if the start-set files exist. Do not set `H3_LICENSE_ACK`.
 
 ```bash
 # from the repository root
@@ -46,12 +46,16 @@ curl -fsS http://127.0.0.1:8188/system_stats
 Leave ComfyUI up. Do not restart it for every video.
 
 ```bash
-# default 8.00 s / 192 frames — server must already be up
-./scripts/submit-prompt.sh workflows/h3-fl2va-default-8s.json \
-  --prompt "A quiet kitchen, morning light, a glass of water on the table." \
+# default generate: Ref2VA 8.00 s / 192 frames — server must already be up
+# --ref-image is optional, repeatable, variable 1–9. 3-view sheets are this flag, not first_frame.
+./scripts/submit-prompt.sh workflows/h3-ref2va-default-8s.json \
+  --prompt "<Picture 1> is the front of the subject. A quiet scene. Stereo room tone. No speech." \
   --seed 42 \
-  --name default-8s
+  --name default-8s \
+  --ref-image "$HOME/h3-data/blue-front.jpg"
 ```
+
+Text-only / no identity images: `workflows/h3-fl2va-default-8s.json`. ~15 s: `workflows/h3-ref2va-long-15s08.json` (**15.08 s / 362**; never 15.00 / 15.04). Do **not** claim a live Ref2VA mp4 exists yet.
 
 SaveVideo writes a suffixed host path under `$HOME/h3-output` (for example `default-8s_00001_.mp4`), not `/opt/ComfyUI/output/…`. Do not set `H3_LICENSE_ACK`.
 

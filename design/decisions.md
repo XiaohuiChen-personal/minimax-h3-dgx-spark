@@ -186,6 +186,42 @@ README and `deploy/README.md` tell **excluded-territory** users (EU, UK, Republi
 
 One GPU. `deploy/compose.yaml` is the documented start path. A raw `docker run` example lives next to it for people who do not use Compose.
 
+## D-15 · Ref2VA is the default generate task
+
+**Status:** adopted for implementation
+
+**What we do.** Default task is **Ref2VA**. Files:
+
+| Role | File |
+|---|---|
+| DiT | `diffusion_models/minimax_h3_ref2va_pruned_fp8_scaled.safetensors` |
+| LoRA | `loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` |
+| TE / VAEs / SPAN | unchanged D-02 / D-04 |
+
+Sampler for Ref2VA: Euler + simple, **4 steps** (5 sigma points including the final zero), shifts **6 / 3**, canvas **960×544**, SPAN 2×, Sage / Sol-Attn `triton_ref` / FBC `H3 Safe` unchanged.
+
+Locked Ref2VA lengths (all three graphs share the sampler / canvas / kernels above):
+
+| Role | File | Seconds | Frames (`17n+5`) | `filename_prefix` |
+|---|---|---|---|---|
+| Fast smoke | `workflows/h3-ref2va-smoke-5s17.json` | 5.17 | 124 | `h3-ref2va-smoke` |
+| Default generate | `workflows/h3-ref2va-default-8s.json` | 8.00 | 192 | `h3-ref2va` |
+| Long (optional) | `workflows/h3-ref2va-long-15s08.json` | **15.08** | **362** | `h3-ref2va-15s08` |
+
+Snap “15 s” / “15.04 s” to **15.08 s / 362**. Never invent **15.00** or **15.04**. D-07 still rejects 15.08 s as the everyday default — keep the 8.00 s file as generate default.
+
+**Why 4 steps.** Official Ref2V Turbo LoRA is 4-step. There is no Comfy-Org 8-step Ref2V LoRA. Do not strap the FL2V 8-step LoRA onto Ref2VA. D-06’s “8 steps for speech” stays on the FL2VA graphs.
+
+**User selects FL2VA** by passing `workflows/h3-fl2va-default-8s.json` (or the 5.17 s smoke) to `submit-prompt.sh`. To make **start** require FL2VA instead of Ref2VA: `H3_TASK=fl2va` in `deploy/.env` or the compose environment, then recreate the container. Both weight sets should already be on disk because the downloader defaults to `--task all`.
+
+**User selects ~15 s Ref2VA** by passing `workflows/h3-ref2va-long-15s08.json`. Snap “15 s” / “15.04 s” to this file. Do not make it the default generate.
+
+**Reference images (variable 1–9).** All three locked Ref2VA graphs ship nine `LoadImage` titles `ref_image_0`…`ref_image_8`. `--ref-image` is optional and repeatable: host files, uploaded via `POST /upload/image`. Submit wires only the first N nested `ref_images` keys. Leftover `LoadImage` nodes stay unlinked `example.png` and are **not** in the SaveVideo DAG. **10+ fail-close** (node autogrow max 9; submit `MAX_REF_IMAGES = 9`). Do not say “six only.” Do not claim unbounded N. Identity tasks should pass ≥1 `--ref-image`. Zero identity stills → submit an FL2VA graph, not 0-ref Ref2VA. `<Picture N>` is 1-based and matches `--ref-image` order. 3-view sheets are Ref2VA identity, **not** `first_frame`. Task 8/9 smokes still use six bird stills (N=6 of 9 slots). Locked graphs are in the tree; do **not** claim a live Ref2VA mp4 exists until those smokes land.
+
+**Rejected.** Using `first_frame` for 3-view sheets. Preloading a UNET in the entrypoint. Requiring a license env flag. Shipping the stock R2V template unchanged. Inventing **15.00** or **15.04** graphs. A composite 3-view contact sheet as the primary smoke. Two GPU jobs (one per bird) for the same wiring proof. 15.08 s as the D-07 default. Strapping the FL2V 8-step LoRA onto Ref2VA.
+
+**Reverses if** a same-seed live test on this box shows the 4-step Ref2V LoRA unusable for the operator’s identity jobs. Then keep the locked graphs; do not invent an 8-step Ref2V LoRA by strapping FL2V.
+
 ## Still unverified (do not block the first implementation)
 
 These are tests for the first real clip, not open product questions:

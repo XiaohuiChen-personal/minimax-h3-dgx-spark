@@ -10,7 +10,7 @@ This file is the **only** copy of the project rules.
 
 Do not fork a second rule set in `CLAUDE.md`, Cursor rules, or chat memory. Edit **this** file.
 
-Product facts live in `design/*.md`. Implementation steps live in `docs/superpowers/plans/2026-08-23-h3-comfyui-implement.md`. Where the plan is more specific (CLI, mounts, lock tests, close-out), **the plan wins**.
+Product facts live in `design/*.md`. The executed FL2VA implement path is `docs/superpowers/plans/2026-08-23-h3-comfyui-implement.md`. The current default-task plan is `docs/superpowers/plans/2026-08-23-h3-ref2va-default.md` (D-15). Where the active plan is more specific (CLI, mounts, lock tests, close-out), **the plan wins**.
 
 ## What this repo is
 
@@ -18,7 +18,7 @@ SSH into this DGX Spark, ask an agent to generate, get an mp4. ComfyUI stays up 
 
 Public repo: `XiaohuiChen-personal/minimax-h3-dgx-spark`. Pages: https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/
 
-**Status:** ComfyUI image (`h3-spark:local`) and locked graphs exist. Generate via `scripts/submit-prompt.sh` and poll `/history/<id>`. Do not invent a new process.
+**Status:** ComfyUI image (`h3-spark:local`) and five locked graphs exist (FL2VA pair + Ref2VA 5.17 / 8.00 / 15.08). Generate via `scripts/submit-prompt.sh` and poll `/history/<id>`. Default generate is Ref2VA 8.00 s. Do not invent a new process. Do **not** claim a live Ref2VA mp4 exists until Task 8/9 smokes land.
 
 If the user only asked to **make a video**, follow **Generate a video** below. Do not re-run the implementation plan.
 
@@ -49,6 +49,7 @@ Full cards: `design/decisions.md`. Do not reopen a locked decision without new m
 | D-12 | SageAttention **2.2.0** + Sol-Attn **`triton_ref`** + FirstBlockCache **`H3 Safe`** + SPAN. |
 | D-13 | Do **not** gate start on `H3_LICENSE_ACK`. Operator accepts Community License risk. Start if weight files exist. |
 | D-14 | `deploy/compose.yaml`, image `h3-spark:local`, `~/h3-output`, `~/h3-data`, port 8188. |
+| D-15 | Default task is **Ref2VA**. Default generate = `workflows/h3-ref2va-default-8s.json` (8.00 s / 192, **4 steps**, Ref2V Turbo LoRA). Locked long = `workflows/h3-ref2va-long-15s08.json` (**15.08 s / 362**). Snap “15 s” / “15.04 s” to 15.08. Never invent 15.00 / 15.04. FL2VA stays selectable. `--ref-image` is variable **1–9** (nine titles `ref_image_0`…`ref_image_8`). 10+ fail-close. 0 refs → FL2VA. |
 
 H3 is a 33.1B single-stream DiT that jointly denoises 24 fps video + 32 kHz stereo, conditioned by frozen Qwen3-VL-32B. CFG-distilled. Frames snap to `17n+5`. Dimensions multiples of 32. `H3-Regenerate-2K` is not open-sourced. bf16 DiT + conditioner do not fit.
 
@@ -76,12 +77,17 @@ One GPU job at a time. A second submit **queues**. That is fine. Do not start a 
 
 ### 2. Pick a locked workflow
 
+The locked set is five graphs: the FL2VA pair plus Ref2VA **5.17 / 8.00 / 15.08**. Do not add a sixth graph. Do not invent a DAG.
+
 | User ask | File | Length |
 |---|---|---|
-| Default / “about 8 seconds” | `workflows/h3-fl2va-default-8s.json` | **8.00 s / 192** |
-| Fast smoke | `workflows/h3-fl2va-smoke-5s17.json` | **5.17 s / 124** |
+| Default / “about 8 seconds” | `workflows/h3-ref2va-default-8s.json` | **8.00 s / 192** |
+| Fast smoke / “about 5 seconds” | `workflows/h3-ref2va-smoke-5s17.json` | **5.17 s / 124** |
+| “15 seconds” / “15.04 s” / “about 15 seconds” | `workflows/h3-ref2va-long-15s08.json` | **15.08 s / 362** |
+| Text-only / no identity images, about 8 seconds | `workflows/h3-fl2va-default-8s.json` | **8.00 s / 192** |
+| Text-only fast smoke | `workflows/h3-fl2va-smoke-5s17.json` | **5.17 s / 124** |
 
-Do not add a third graph. If they say “10 seconds,” snap to **10.13 s** or refuse. Never invent **10.00 s**. There is no locked 10.13 s JSON in this repo — refuse or ask them to accept 8.00 s.
+Snap “15 s” / “15.04 s” to **15.08 s / 362**. Never invent **15.00** or **15.04**. If they say “10 seconds,” snap to **10.13 s** or refuse. Never invent **10.00 s**. There is no locked 10.13 s JSON in this repo — refuse or ask them to accept 8.00 s.
 
 ### 3. Inputs you may set
 
@@ -89,16 +95,30 @@ H3 is **CFG-distilled**. There is **one** text field (`prompt`). There is **no**
 
 | CLI | Graph field | Required | What to put |
 |---|---|---|---|
-| `--prompt` | `prompt` (also patches `text` if present) | yes | **One** English (or mixed) string. This is joint **video + stereo audio**. Describe what is on screen **and** what is heard. If they want speech, write that someone is speaking and, when they gave lines, quote the lines. A silent scene (e.g. “quiet kitchen”) yields room tone, not dialogue. |
+| `--prompt` | `prompt` (also patches `text` if present) | yes | **One** English (or mixed) string. This is joint **video + stereo audio**. Describe what is on screen **and** what is heard. On Ref2VA, name each still with 1-based `<Picture N>` in `--ref-image` order (`<Picture 1>`…`<Picture N>` only). Do **not** write `<Picture N>` on FL2VA graphs (empty theater). If they want speech on **FL2VA**, write that someone is speaking and, when they gave lines, quote the lines. Ref2VA is the 4-step LoRA — first smokes stay quiet / no speech. A silent scene yields room tone, not dialogue. |
 | `--seed` | `noise_seed` / `seed` | yes | Integer. Reuse the user’s seed; otherwise pick one and tell them. |
-| `--name` | `filename_prefix` | yes | Short token, no `/`. Example: `kitchen-talk`. |
-| `--first-frame` / `--last-frame` | `first_frame` / `last_frame` | no | **Not usable on the two locked T2V graphs today.** Those JSONs omit the keys so `--first-frame` **fail-closes**. Do not add empty IMAGE keys. Do not write `<Picture N>` in the prompt (empty theater). Do not switch to Ref2VA. If they need image-to-video, say the locked T2V path cannot take stills yet. |
+| `--name` | `filename_prefix` | yes | Short token, no `/`. Example: `two-birds`. |
+| `--ref-image` | `LoadImage` titles `ref_image_0`…`ref_image_8`, then nested `ref_images` | no | Optional, **repeatable**, host files. Uploaded via `POST /upload/image` (not a host path in the graph). **Variable 1–9.** This product ships nine `LoadImage` titles. Do **not** say “six only.” Do not claim unbounded N (node max 9; 10+ fail-close). Leftover `LoadImage`s stay unlinked `example.png` and are not in the SaveVideo DAG. **0 refs → submit FL2VA**, not 0-ref Ref2VA. Identity stills (including 3-view sheets) are Ref2VA `--ref-image`, **not** `first_frame`. Task 8/9 smokes still use the six bird stills (N=6 of 9 slots). |
+| `--first-frame` / `--last-frame` | `first_frame` / `last_frame` | no | **Not usable on the locked FL2VA T2V graphs today.** Those JSONs omit the keys so `--first-frame` **fail-closes**. Do not add empty IMAGE keys. Do not treat a 3-view sheet as `first_frame`. If they need identity stills, use Ref2VA + `--ref-image`. |
 
-Locked (do not change): D-02 checkpoints, **960×544**, **8 steps**, Euler+simple, shifts **6 / 3**, Sage 2.2, Sol-Attn `triton_ref`, FBC `H3 Safe`, SPAN 2× → crop 1920×1080, 24 fps + 32 kHz stereo.
+Locked (do not change): Ref2VA uses the D-15 DiT + 4-step Ref2V LoRA; FL2VA uses the D-02 DiT + 8-step FL2V LoRA. Shared: **960×544**, Euler+simple, shifts **6 / 3**, Sage 2.2, Sol-Attn `triton_ref`, FBC `H3 Safe`, SPAN 2× → crop 1920×1080, 24 fps + 32 kHz stereo. Ref2VA **4 steps**. FL2VA **8 steps**. Do not strap the FL2V LoRA onto Ref2VA.
 
 ### 4. Command
 
 From the **repository root**. Do not `cd` into `deploy/`.
+
+Default generate (Ref2VA 8.00 s). Repeat `--ref-image` once per host still (1–9). Identity example (N=2; the six-bird smoke is N=6 of 9 slots):
+
+```bash
+./scripts/submit-prompt.sh workflows/h3-ref2va-default-8s.json \
+  --prompt "<Picture 1> is the front of the blue monk parakeet. <Picture 2> is the side. Printed Front/Side words are captions, not plumage. A quiet perch. Stereo room tone. No speech." \
+  --seed 42 \
+  --name two-birds \
+  --ref-image "$HOME/h3-data/blue-front.jpg" \
+  --ref-image "$HOME/h3-data/blue-side.jpg"
+```
+
+Text-only / no identity images (FL2VA 8.00 s, 8 steps — use this for speech):
 
 ```bash
 ./scripts/submit-prompt.sh workflows/h3-fl2va-default-8s.json \
@@ -107,7 +127,7 @@ From the **repository root**. Do not `cd` into `deploy/`.
   --name kitchen-talk
 ```
 
-The script `POST`s `/prompt` and polls `/history/<id>` (2 s, timeout 3600 s). Jobs take **minutes** (warm 5.17 s was ~3 min; warm 8.00 s was ~5 min on this box). Wait. Do not assume one chat turn is enough.
+The script `POST`s `/prompt` and polls `/history/<id>` (2 s, timeout 3600 s). Jobs take **minutes** (warm FL2VA 5.17 s was ~3 min; warm FL2VA 8.00 s was ~5 min on this box). Wait. Do not assume one chat turn is enough. Do **not** claim a live Ref2VA mp4 exists yet.
 
 ### 5. Output
 
@@ -124,11 +144,11 @@ OUTPUT /home/<user>/h3-output/<name>_00001_.mp4
 
 ### Generate contract (same rules)
 
-Agent may change only: **prompt**, **seed**, **filename**, optional **first/last-frame files** (rejected on today’s T2V graphs). Call `scripts/submit-prompt.sh`. Do not start, restart, or kill ComfyUI for a normal generate.
+Agent may change only: **prompt**, **seed**, **filename**, optional **`--ref-image` host files** (Ref2VA, variable 1–9), optional **first/last-frame files** (rejected on today’s locked FL2VA T2V graphs). Call `scripts/submit-prompt.sh`. Do not start, restart, or kill ComfyUI for a normal generate.
 
 ## Downloads and mounts
 
-- Do **not** download H3 weights unless the operator is executing **plan Task 6**.
+- Do **not** download H3 weights unless the operator is executing the Ref2VA plan **Task 2** (`download-weights.sh DIR [--task ref2va|fl2va|all]`; default `--task all`).
 - `hf download Comfy-Org/MiniMax-H3 <repo-relative-path> --local-dir "$DIR"`.
 - Never `huggingface-cli`. Never `--local-dir-use-symlinks`. Never `--include "*.safetensors"` on `Comfy-Org/MiniMax-H3` (that is the **~471 G** snapshot, including Ref2VA).
 - Mount **subfolders only**: `diffusion_models`, `text_encoders`, `vae`, `loras`, `upscale_models` → `/opt/ComfyUI/models/<name>`. Do not bind the whole `~/h3-weights` tree over `/opt/ComfyUI/models`.
@@ -137,7 +157,7 @@ Agent may change only: **prompt**, **seed**, **filename**, optional **first/last
 
 ## Implementation process
 
-Plan: `docs/superpowers/plans/2026-08-23-h3-comfyui-implement.md`.
+Plans: executed FL2VA path `docs/superpowers/plans/2026-08-23-h3-comfyui-implement.md`; current default-task path `docs/superpowers/plans/2026-08-23-h3-ref2va-default.md`.
 
 - New Cursor chat, **Multitask mode**, skill `superpowers:subagent-driven-development`. Parent coordinates. Parent does not write `scripts/` or `deploy/` unless a worker is blocked.
 - **Cursor workers:** every implementer, spec reviewer, adversarial reviewer, and fixer uses model slug `cursor-grok-4.6-xhigh-fast`. If that slug is missing, **stop**. Do not silently swap models.
