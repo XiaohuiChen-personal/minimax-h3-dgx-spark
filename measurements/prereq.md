@@ -444,6 +444,61 @@ MiniMax H3 FBCache: cached 0/8 steps; estimated block-stack speedup 1.00x; resid
 
 Sampler: step 1 **28.47 s** (model init), then **~19.5–20.8 s/it**; `8/8 [02:39, 19.97s/it]` (5.17 s smoke was **~11.4 s/it**). No import failure. First-boot `Using pytorch attention` is still the pre-graph default. First generate (Task 10) had already printed `Using sage attention mode: sageattn_qk_int8_pv_fp16_triton` and `[MiniMax H3 Sol] patched 50 of 50`. This 8.00 s log did **not** reprint `[MiniMax H3 Sol] active (N tokens)` because node 8 was cached; the live model still showed **208 patches attached**. Do not treat the missing second `active` line as a hidden fallback.
 
+## Task 8 — Live Ref2VA 5.17 s smoke (both birds)
+
+ComfyUI was already up (`deploy-comfyui-1`, `h3-spark:local`, port 8188). Did **not** start, restart, or kill it. Six stills cropped 80 px footer into `$HOME/h3-data` (not committed). Graph: `workflows/h3-ref2va-smoke-5s17.json`. Six `--ref-image` flags. Seed 42. Name `smoke-ref2va-5s17`.
+
+| | |
+|---|---|
+| Result | **PASS** (video stream + `audio,2`; `smoke-test.sh` exit 0) |
+| Start (UTC) | `2026-08-24T04:15:10Z` (`1787544910.565115570`) |
+| End (UTC) | `2026-08-24T04:17:24Z` (`1787545044.885467602`) |
+| Wall-clock | **134.320 s** (client `date +%s.%N`) |
+| ComfyUI | `Prompt executed in 133.02 seconds` (`prompt_id` `f32b42ec-97af-4879-bce3-62a4f61b623e`) |
+| Host output | `/home/xiaohui_chen/h3-output/smoke-ref2va-5s17_00001_.mp4` (SaveVideo suffix; not `smoke-ref2va-5s17.mp4`) |
+| Bytes | `1923457` |
+
+`argv` (unchanged): `main.py --listen 0.0.0.0 --port 8188 --fast fp8_matrix_mult --disable-pinned-memory`.
+
+### Audio / video probe
+
+`ffprobe -hide_banner "$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4"` (stream lines):
+
+```
+Duration: 00:00:05.17, start: 0.000000, bitrate: 2978 kb/s
+Stream #0:0: Video: h264 (High) (avc1), yuv420p, 1920x1080, 24 fps
+Stream #0:1: Audio: aac (LC) (mp4a), 32000 Hz, stereo, fltp, 127 kb/s
+```
+
+Contract probes:
+
+```
+$ ffprobe -v error -select_streams v:0 -show_entries stream=codec_type,width,height,r_frame_rate,nb_frames -of csv=p=0 ...
+video,1920,1080,24/1,124
+$ ffprobe -v error -select_streams a:0 -show_entries stream=codec_type,channels,channel_layout,sample_rate -of csv=p=0 ...
+audio,32000,2,stereo
+```
+
+`./scripts/smoke-test.sh --offline-mp4 "$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4"` → exit 0.
+
+### Sage / Sol-Attn (must not hide fallback)
+
+This first live Ref2VA run printed (not cached):
+
+```
+Using sage attention mode: sageattn_qk_int8_pv_fp16_triton
+[MiniMax H3 Sol] patched 50 of 50 attention blocks (tau=1.30, min_tokens=4096, strict=False)
+MiniMax H3 FBCache enabled: H3 Safe — 0.08 / max 2
+[MiniMax H3 Sol] active (19797 tokens)
+MiniMax H3 FBCache: cached 0/4 steps; estimated block-stack speedup 1.00x; residual diff min/median/max 0.23730/0.24805/0.45117
+```
+
+Sampler: `4/4 [00:39, 9.95s/it]` after model init (~24 s). No import failure. Did **not** run `h3-ref2va-long-15s08.json`.
+
+### FL2VA still selectable (validation only)
+
+`POST /prompt` of `workflows/h3-fl2va-smoke-5s17.json`: HTTP **200**, `node_errors` `{}`, `prompt_id` `e07eafa0-8028-41b7-8514-e805db3879cd`. `/queue` delete returned HTTP 200 but left the job **running**. Immediate `POST /interrupt` (HTTP 200): history `execution_interrupted`, `completed` False, log `Processing interrupted` / `Prompt executed in 9.35 seconds`. Queue empty. No surprise FL2VA mp4.
+
 ### Pins (also in `deploy/README.md`)
 
 ```
