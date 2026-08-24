@@ -18,7 +18,11 @@
 - Never bake `*.safetensors` / `*.pth` / `*.mp4` into git or a Docker layer.
 - Never enable EasyCache, SageAttention 3, `--use-sage-attention`, Sol-Attn `flex_attention`, Turbo-SLA+Sol-Attn, or `--lowvram`.
 - Do not require `H3_LICENSE_ACK` (D-13).
-- One GPU job at a time. Do not start or restart ComfyUI except Task 7 (image rebuild / `H3_TASK` start). Tasks 1–6 must not `docker compose down` / `up` / `restart` / `kill`.
+- Work on feature branch **`feat/h3-ref2va-default`**. Do not implement Tasks 1–9 on `main`. Push with `git push -u origin HEAD` (never `--force`).
+- One GPU job at a time. Do not start or restart ComfyUI except Task 7 (image rebuild / `H3_TASK` start). Tasks 1–6 must not `docker compose down` / `up` / `restart` / `kill`. Tasks 8–9 must not restart. If Task 7/8/9 find the GPU busy with a leftover job, they may `POST /interrupt` or stop a **non-ComfyUI** leftover process. They must not start a second ComfyUI.
+- Legal Ref2VA lengths in this plan: **5.17 s / 124**, **8.00 s / 192** (D-07 default), **15.08 s / 362**. Snap “15 s” / “15.04 s” to **15.08 s / 362**. Never invent **15.00** or **15.04** graphs. D-07 rejected 15.08 as the everyday default — keep `h3-ref2va-default-8s.json` as the generate default.
+- All locked Ref2VA graphs (smoke, default, **and** 15.08) ship six `LoadImage` nodes titled `ref_image_0` … `ref_image_5`. Live Task 8 and Task 9 smokes use the operator’s **six** stills (two birds × three views), not a composite 3-view sheet.
+- Every task ends with **Parent close-out** (spec reviewer → fixer if needed → adversarial reviewer **and fixer** → re-smoke → push). Do not weaken that to “reviewer only.”
 - Mount scheme stays subfolder binds. New DiT/LoRA files go into the existing `diffusion_models` and `loras` binds — no new volume for weights.
 - Hugging Face: `hf download Comfy-Org/MiniMax-H3 <repo-relative-path> --local-dir DIR`. Never `huggingface-cli`. Never `--local-dir-use-symlinks`. Never `--include "*.safetensors"` on that repo.
 - Do not switch the text encoder to NVFP4. Keep `qwen3vl_32b_minimax_h3_int8_convrot.safetensors`.
@@ -65,14 +69,15 @@ ComfyUI does **not** load a DiT at process start. “Default Ref2VA at start” 
 | `scripts/submit-prompt.py` | `--ref-image` (repeatable, max 9): upload + LoadImage filename + nested `ref_images` |
 | `scripts/smoke-test.sh` | Optional `--workflow`; default Ref2VA 5.17 s graph |
 | `workflows/h3-ref2va-smoke-5s17.json` | 960×544, length 124, 4 steps, Ref2VA |
-| `workflows/h3-ref2va-default-8s.json` | 960×544, length 192, 4 steps, Ref2VA |
+| `workflows/h3-ref2va-default-8s.json` | 960×544, length 192, 4 steps, Ref2VA (D-07 default generate) |
+| `workflows/h3-ref2va-long-15s08.json` | 960×544, length **362**, 4 steps, Ref2VA (15.08 s; not the default) |
 | `workflows/h3-fl2va-*.json` | Unchanged product graphs |
 | `tests/unit/test_check_weights.sh` | Shared / task / missing-file fixtures |
 | `tests/unit/test_workflow_lock.py` | Split FL2VA vs Ref2VA forbidden strings |
 | `tests/unit/test_submit_prompt.py` | `--ref-image` upload + nested wiring |
 | `tests/fixtures/tiny-ref2va-workflow.json` | API graph with LoadImage + `MiniMaxH3ReferenceToVideo` |
 | `deploy/compose.yaml` | `H3_TASK: ${H3_TASK:-ref2va}` |
-| `deploy/Dockerfile` | `test -f` the two new workflow JSON files |
+| `deploy/Dockerfile` | `test -f` the **three** new Ref2VA workflow JSON files |
 | `design/decisions.md` | New **D-15** |
 | `AGENTS.md` | Default generate = Ref2VA graph + `--ref-image` |
 
@@ -88,11 +93,226 @@ ComfyUI does **not** load a DiT at process start. “Default Ref2VA at start” 
 
 Sampler for Ref2VA: Euler + simple, **4 steps** (5 sigma points including the final zero), shifts **6 / 3**, canvas **960×544**, SPAN 2×, Sage / Sol-Attn `triton_ref` / FBC `H3 Safe` unchanged.
 
+Locked Ref2VA lengths (all three graphs share the sampler / canvas / kernels above):
+
+| Role | File | Seconds | Frames (`17n+5`) | `filename_prefix` |
+|---|---|---|---|---|
+| Fast smoke | `workflows/h3-ref2va-smoke-5s17.json` | 5.17 | 124 | `h3-ref2va-smoke` |
+| Default generate | `workflows/h3-ref2va-default-8s.json` | 8.00 | 192 | `h3-ref2va` |
+| Long (optional) | `workflows/h3-ref2va-long-15s08.json` | **15.08** | **362** | `h3-ref2va-15s08` |
+
 **Why 4 steps.** Official Ref2V Turbo LoRA is 4-step. There is no Comfy-Org 8-step Ref2V LoRA. Do not strap the FL2V 8-step LoRA onto Ref2VA. D-06’s “8 steps for speech” stays on the FL2VA graphs.
 
 **User selects FL2VA** by passing `workflows/h3-fl2va-default-8s.json` (or the 5.17 s smoke) to `submit-prompt.sh`. To make **start** require FL2VA instead of Ref2VA: `H3_TASK=fl2va` in `deploy/.env` or the compose environment, then recreate the container (Task 7). Both weight sets should already be on disk because the downloader defaults to `--task all`.
 
-**Rejected.** Using `first_frame` for 3-view sheets. Preloading a UNET in the entrypoint. Requiring a license env flag. Shipping the stock R2V template unchanged.
+**User selects ~15 s Ref2VA** by passing `workflows/h3-ref2va-long-15s08.json`. Snap “15 s” / “15.04 s” to this file. Do not make it the default generate.
+
+**Rejected.** Using `first_frame` for 3-view sheets. Preloading a UNET in the entrypoint. Requiring a license env flag. Shipping the stock R2V template unchanged. Inventing **15.00** or **15.04** graphs. A composite 3-view contact sheet as the primary smoke. Two GPU jobs (one per bird) for the same wiring proof. 15.08 s as the D-07 default.
+
+---
+
+## Operator amendments (2026-08-23)
+
+Research notes, then the lock. Do not reopen these during Tasks 1–9.
+
+**Sources cited**
+
+- D-07 legal lengths and “rejected 15.08 as the default”: `design/decisions.md`
+- Frame grid `17n+5` at 24 fps: `design/architecture.md`
+- Comfy-Org node tags are 1-based `<Picture N>` / `<Video N>` / `<Audio N>` in **connection order**: [MiniMaxH3ReferenceToVideo](https://docs.comfy.org/built-in-nodes/MiniMaxH3ReferenceToVideo), [Comfy MiniMax H3 tutorial (R2V prompting tips)](https://docs.comfy.org/tutorials/video/minimax/minimax-h3)
+- Official full-reference rewrite (six sections; `<Subject N>` may cite `<Picture N>`): [VIDEO_PROMPT_WRITING_GUIDE_ref_en.md](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md), [h3-prompt-writing skill](https://github.com/MiniMax-AI/MiniMax-H3/blob/main/skills/h3-prompt-writing/SKILL.md)
+- Visible scene text is preserved / H3 renders spelled-out text cleanly: same MiniMax rewrite guide (“text visibly present in the scene”) and the Comfy tutorial (“Accurate text rendering”)
+- Operator stills (pixels verified 2026-08-23): six portrait JPEGs, all **1024 px tall**, printed `Front` / `Side` / `Back` in grey at the bottom. Chat captions match the pixels.
+
+Pixel probe of the six files (Pillow + row scan, near-white threshold 240):
+
+| Locked name | Source basename | Pixels | View word | Label ink `y` | Bird lowest `y` | Gap bird→label |
+|---|---|---|---|---|---|---|
+| `blue-front.jpg` | `78E74295-…_3-b4506c74-….jpg` | 386×1024 | Front | 936–956 | 882 | 53 px |
+| `blue-side.jpg` | `78E74295-…_2-963ed79f-….jpg` | 474×1024 | Side | 935–955 | 879 | 55 px |
+| `blue-back.jpg` | `78E74295-…-27107fe0-….jpg` | 313×1024 | Back | 935–955 | 883 | 51 px |
+| `yellow-front.jpg` | `A54A17AE-…_3-2d36df87-….jpg` | 356×1024 | Front | 947–967 | 903 | 43 px |
+| `yellow-side.jpg` | `A54A17AE-…_2-09becfd0-….jpg` | 519×1024 | Side | 947–967 | 900 | 46 px |
+| `yellow-back.jpg` | `A54A17AE-…-91af16e7-….jpg` | 306×1024 | Back | 946–967 | 904 | 41 px |
+
+An 80 px bottom crop (`ih-80` → height 944) keeps every bird. Tightest leftover above the crop line: yellow-back (904 < 944).
+
+### A. Duration snap
+
+| Option | Pros | Cons |
+|---|---|---|
+| **15.08 s / 362** (`17×21+5`, 362/24 = 15.0833 s) | Legal D-07 length. Matches the operator’s “~15.04 s” ask. Same encoding as `5s17`. | Slower than 8.00 s. D-07 says this is where “bad audio” stories pile up. |
+| 15.04 s / ~361 frames | Matches the spoken number | **Illegal.** 15.04×24 = 360.96. Not `17n+5`. |
+| 15.00 s / 360 frames | Round number | **Illegal.** 360 = 17×20+20, not `17n+5`. |
+| Keep only 5.17 / 8.00 | Faster plan | Operator required a generatable, smoke-tested ~15 s path. |
+
+**Chosen:** `workflows/h3-ref2va-long-15s08.json`, `length` **362**, `filename_prefix` `h3-ref2va-15s08`. The `long` token marks role (like `smoke` / `default`); `15s08` matches the `5s17` fractional encoding. Default generate stays the 8.00 s file (D-07).
+
+### B. Where the 15.08 graph is built vs smoked
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Build + lock-test in Task 4; live GPU 15.08 in new Task 9** | First live proof stays the cheap 5.17 s wiring test. 15.08 cannot hide a Task 4 JSON bug — lock tests catch `362` before GPU time. | Extra task. |
+| Fold 15.08 live into Task 8 | Fewer tasks | A 15-minute GPU job sitting behind the first 5.17 proof. If 5.17 fails you still burned the long job, or you skip the long proof. |
+| Build the 15.08 JSON in Task 9 | Isolates the long file | Dockerfile `test -f` (Task 5) and AGENTS (Task 6) would mention a file that does not exist yet. |
+
+**Chosen:** Task 4 builds and lock-tests all three JSONs (same `test_workflow_lock.py`). Task 5 `test -f` includes the 15.08 file. Task 6 lists it as the “~15 seconds / 15.08 s” path. Task 8 lives **only** 5.17 s. **Task 9** is the live 15.08 s proof.
+
+### C. Six reference images (wiring + smoke)
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Six `LoadImage` nodes on every Ref2VA graph; six `--ref-image` flags; six host files** | Product path the operator asked for. No JSON edit to attach 6 refs. | Larger graphs. Prompt must name all six tags. |
+| One composite 3-view sheet, one `--ref-image` | Fewer uploads | Operator forbade this as the **primary** smoke. Loses per-view `<Picture N>` control. |
+| Two LoadImage nodes (one bird) | Smaller | Cannot prove two-identity wiring. |
+
+**Chosen:** titles `ref_image_0`…`ref_image_5` on **all three** Ref2VA JSONs. Do **not** commit a `ref_images` dict (submit writes the nested dict).
+
+**`--ref-image` / `<Picture N>` order** (1-based tags = upload order = title suffix + 1). Confirmed against pixels, not chat captions:
+
+| Flag order | `$HOME/h3-data` name | `<Picture N>` | Identity + view |
+|---|---|---|---|
+| 1 | `blue-front.jpg` | `<Picture 1>` | blue Front |
+| 2 | `blue-side.jpg` | `<Picture 2>` | blue Side |
+| 3 | `blue-back.jpg` | `<Picture 3>` | blue Back |
+| 4 | `yellow-front.jpg` | `<Picture 4>` | yellow Front |
+| 5 | `yellow-side.jpg` | `<Picture 5>` | yellow Side |
+| 6 | `yellow-back.jpg` | `<Picture 6>` | yellow Back |
+
+Cursor asset → dest mapping (copy/crop in Task 8 Step 1; **do not commit**):
+
+```text
+…/assets/78E74295-FF28-40F5-9002-C3AAFF8608E3_3-b4506c74-a621-488f-842a-f474247bcd5a.jpg  →  $HOME/h3-data/blue-front.jpg
+…/assets/78E74295-FF28-40F5-9002-C3AAFF8608E3_2-963ed79f-7e20-4cd9-8474-1a282c80c508.jpg  →  $HOME/h3-data/blue-side.jpg
+…/assets/78E74295-FF28-40F5-9002-C3AAFF8608E3-27107fe0-4aad-44f5-b78c-f82b7a204def.jpg     →  $HOME/h3-data/blue-back.jpg
+…/assets/A54A17AE-824F-4899-B252-54DF46DE1340_3-2d36df87-8570-44c7-be8f-4507298db573.jpg  →  $HOME/h3-data/yellow-front.jpg
+…/assets/A54A17AE-824F-4899-B252-54DF46DE1340_2-09becfd0-dd8a-4da8-b974-fdd279d9b37a.jpg  →  $HOME/h3-data/yellow-side.jpg
+…/assets/A54A17AE-824F-4899-B252-54DF46DE1340-91af16e7-ae0f-4714-993f-7719229ec008.jpg     →  $HOME/h3-data/yellow-back.jpg
+```
+
+**Prompt language.** Official Comfy R2V tip: name each input with `<Picture N>` in connection order and assign a job (identity). Official MiniMax rewrite: six sections; a character is `<Subject N>` whose appearance comes from `<Picture N>`. Live Task 8 / Task 9 prompts use that six-section form (quality). Committed JSON default prompts may stay shorter and still mention `<Picture 1>`…`<Picture 6>` so the tag language is documented. First smokes stay **quiet / no speech**: D-06 says 4 steps smear dialogue; Comfy’s own R2V turbo note says the 4-step LoRA trades audio quality; a 15.08 proof is length + identity + wiring, not a speech demo.
+
+### D. One video with both birds vs two videos
+
+| Option | Pros | Cons |
+|---|---|---|
+| **One 5.17 s smoke and one 15.08 s smoke, both with all six refs** | Harder real product path. Proves two-identity nested `ref_images`. One GPU job per length. | If identity collapses, you cannot tell which bird the graph “prefers” without a second run. |
+| Two 5.17 s jobs (one bird each) plus 15.08 | Cleaner A/B | Operator asked to use both birds, not to burn the GPU twice for the same wiring proof. No evidence that quality **requires** split jobs. |
+| 15.08 only | Saves a 5.17 job | Loses the cheap first live proof (B). |
+
+**Chosen:** one two-bird 5.17 s (Task 8) and one two-bird 15.08 s (Task 9). No second GPU job per bird.
+
+### E. Printed labels on the stills
+
+| Option | Pros | Cons |
+|---|---|---|
+| Use as-is + prompt “ignore Front/Side/Back” | Operator’s default preference. Zero pixel loss. | MiniMax rewrite guide **preserves visible scene text**. Comfy tutorial advertises accurate text rendering. The words can burn into the mp4. |
+| **Crop the clean 80 px footer** | Label ink is a 21–22 px grey word on white, 41–55 px below the tail. 80 px crop never hits feathers (measured). Highest identity quality: no caption tokens. | Slightly tighter framing. Extra Task 8 command. |
+| Manual per-file crop | Could shave less white | Six different recipes. Easy to clip a tail. |
+
+**Chosen:** crop. Quality > the as-is shortcut. Footer is a clean white strip (not a graphic bar on the bird). Exact command (ffmpeg 7.x is on this Spark at `~/.local/bin/ffmpeg`; ImageMagick `convert` is also present):
+
+```bash
+ffmpeg -y -i "$src" -vf "crop=iw:ih-80:0:0" "$dest"
+# equivalent: convert "$src" -gravity North -crop x944+0+0 +repage "$dest"
+```
+
+Outputs live under `$HOME/h3-data/*.jpg` only. Never git-add them. Prompts still say the printed words are captions, in case a later generate uses an uncropped still.
+
+### F. Branching
+
+| Option | Pros | Cons |
+|---|---|---|
+| **`feat/h3-ref2va-default` from current `main`** | Matches the operator. Later workers stay off `main`. | One extra checkout. |
+| Implement on `main` | Fewer git steps | Operator forbade it. |
+
+**Chosen:** `feat/h3-ref2va-default`. `git push -u origin HEAD`. Never `--force`.
+
+### G. Old SDD ledger
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Archive `progress.md` → `progress-h3-comfyui-implement.md`; new `progress.md` for this plan** | FL2VA Tasks 1–11 stay readable. This plan gets a clean ledger. | `.superpowers/sdd/.gitignore` is `*`, so ledgers stay **on disk only**. |
+| Reuse the FL2VA ledger | One file | Mixes two plans. Easy to mark Task 1 “complete” by accident. |
+
+**Chosen:** archive + new ledger. Header names this plan, workspace `/home/xiaohui_chen/Projects/minimax-h3-dgx-spark`, branch `feat/h3-ref2va-default`, start HEAD = the plan-amendment commit. Do not force-add ignored files.
+
+### H. Adversarial close-out
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Copy-paste Parent close-out = AGENTS.md sequence, adversarial agent may fix** | Same contract as the FL2VA implement plan. Catches illegal lengths and Ref2VA drift. | More subagent turns. |
+| Spec reviewer only | Faster | Operator forbade weakening this. |
+
+**Chosen:** the **Parent close-out** section below. Every task ends with “Then parent close-out”.
+
+### I. Stopping ComfyUI
+
+| Option | Pros | Cons |
+|---|---|---|
+| **Tasks 1–6 no compose down/up/restart; Task 7 may recreate once; Task 8–9 no restart; interrupt leftover GPU jobs** | Matches D-08 and the operator’s “you may free the GPU” note without a second server. | Task 7 is the only allowed recreate. |
+| Restart whenever the GPU looks busy | Simple | Reloads weights. Violates D-08. |
+
+**Chosen:** the Global Constraints bullet above. `POST http://127.0.0.1:8188/interrupt` if a leftover **ComfyUI** job holds the GPU. Stop a non-ComfyUI leftover process if that is what is busy. Never start a second ComfyUI.
+
+---
+
+## Parent close-out
+
+Copy this after every task. Do **not** start Task N+1 and do **not** push until this list is done for Task N. Do not weaken step 4 to “reviewer only.”
+
+**Required model** on every implementer, spec reviewer, adversarial reviewer, and fixer: Cursor slug `cursor-grok-4.6-xhigh-fast`. Do not inherit the parent model. Do not substitute Claude, GPT, or Composer. If the slug is missing, **stop**.
+
+1. **Implementer** (`cursor-grok-4.6-xhigh-fast`): implement only Task N, TDD as specified, **commit only**. No push.
+2. **Spec reviewer** (`cursor-grok-4.6-xhigh-fast`, read-only): diff vs this plan’s Task N and `design/*.md`. Spec ✅/❌. Does not edit.
+3. **Fixer** if Critical/Important: same model; implement only those fixes; commit; re-run the covering tests.
+4. **Adversarial reviewer AND fixer** (new subagent, same model): hunt inaccuracies, bugs, silent fallbacks, forbidden flags, tests that pass on stubs, CPU-torch traps, baked weights, license gates, Ref2VA drift, illegal lengths (**15.04 / 15.00 / 10.00**), FL2VA LoRA on Ref2VA, flat `ref_image_0` keys, host paths in `LoadImage`. Fix what you can prove. Commit `fix: … after adversarial review of Task N`. Do not invent a new stack.
+5. **Re-smoke** (do not `|| true`). If re-smoke fails, fix and re-smoke again. No push on red tests.
+   - Tasks 1–6:
+
+```bash
+cd /home/xiaohui_chen/Projects/minimax-h3-dgx-spark
+[[ -f tests/unit/test_check_weights.sh ]] && bash tests/unit/test_check_weights.sh
+[[ -f tests/unit/test_download_weights_help.sh ]] && bash tests/unit/test_download_weights_help.sh
+[[ -f tests/unit/test_entrypoint_flags.sh ]] && bash tests/unit/test_entrypoint_flags.sh
+compgen -G 'tests/unit/test_*.py' >/dev/null && python3 -m pytest tests/unit -v
+```
+
+   - Task 7:
+
+```bash
+curl -fsS http://127.0.0.1:8188/system_stats
+docker compose -f deploy/compose.yaml ps
+```
+
+   - Task 8: offline 5.17 mp4; **also** a live 5.17 re-run if graphs, scripts, or the image changed:
+
+```bash
+./scripts/smoke-test.sh --offline-mp4 "$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4"
+```
+
+   - Task 9: offline 15.08 mp4 only (do not restart ComfyUI; do not run a second 15.08 unless the long graph/scripts/image changed — then re-run the Task 9 submit):
+
+```bash
+./scripts/smoke-test.sh --offline-mp4 "$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4"
+```
+
+6. **`git push -u origin HEAD`**. Never `--force`. Never `--no-verify` unless the operator said so.
+
+**Adversarial prompt (parent must include).**
+
+- You are an adversarial reviewer **and fixer** on Grok 4.6 xhigh fast (`cursor-grok-4.6-xhigh-fast`).
+- Scope: Task N diff + the files it touched + this plan’s Decision lock and Operator amendments.
+- Hunt the list in step 4. Fix what you can prove. Re-run the re-smoke commands. Commit. Do not push (close-out step 6 pushes).
+- Return: finding → fix → test evidence.
+
+**Dispatch slug (parent must copy):**
+
+```text
+Task.model = cursor-grok-4.6-xhigh-fast
+```
+
+**Order.** Do not start Task N+1 until Task N close-out (including push) is done, except: Task 2 download and Task 3 `--ref-image` may overlap after Task 1 if only one writer is active (Task 3 does not need the new weights). Task 4 may start after Task 3 (needs the submit contract) and does not need the download. Task 5 needs Task 1. Task 6 may start after Task 4 (docs name the three JSONs). Task 7 needs Tasks 2 + 4 + 5. Task 8 needs Task 7. Task 9 needs Task 8.
 
 ---
 
@@ -301,7 +521,7 @@ EOF
 )"
 ```
 
-Then parent close-out (spec → adversarial fix → re-smoke unit tests → push).
+Then parent close-out (copy **Parent close-out**).
 
 ---
 
@@ -382,7 +602,7 @@ EOF
 )"
 ```
 
-Then parent close-out. After this task the **running** container can see the new files (same binds) without a rebuild. Do not submit a Ref2VA sample yet — graphs do not exist.
+Then parent close-out (copy **Parent close-out**). After this task the **running** container can see the new files (same binds) without a rebuild. Do not submit a Ref2VA sample yet — graphs do not exist.
 
 ---
 
@@ -524,7 +744,7 @@ EOF
 )"
 ```
 
-Then parent close-out.
+Then parent close-out (copy **Parent close-out**).
 
 ---
 
@@ -533,26 +753,42 @@ Then parent close-out.
 **Files:**
 - Create: `workflows/h3-ref2va-smoke-5s17.json`
 - Create: `workflows/h3-ref2va-default-8s.json`
+- Create: `workflows/h3-ref2va-long-15s08.json`
 - Modify: `tests/unit/test_workflow_lock.py`
 - Modify: `scripts/smoke-test.sh`
 
 **Interfaces:**
 - Consumes: `workflows/h3-fl2va-default-8s.json` as the structural template (same Sage / Sol-Attn / FBC / SPAN / SaveVideo chain)
-- Produces: two API-format Ref2VA graphs. Smoke `length=124`, default `length=192`. Both: width 960, height 544, steps 4, Ref2VA FP8 UNET, Ref2V 4-step LoRA, `MiniMaxH3ReferenceToVideo` with `audio_vae` linked to the audio VAE loader, `ref_image_size=match`, six `LoadImage` nodes titled `ref_image_0` … `ref_image_5` (so `--ref-image` can attach up to 6 without editing JSON). Do **not** put a `ref_images` dict in the committed JSON (0 refs until submit wires it). Default prompt may contain `<Picture 1>` / `<Picture 2>` as documentation of the tag language.
+- Produces: **three** API-format Ref2VA graphs. Smoke `length=124`, default `length=192`, long `length=362`. All three: width 960, height 544, steps 4, Ref2VA FP8 UNET, Ref2V 4-step LoRA, `MiniMaxH3ReferenceToVideo` with `audio_vae` linked to the audio VAE loader, `ref_image_size=match`, six `LoadImage` nodes titled `ref_image_0` … `ref_image_5` (so six `--ref-image` flags work without editing JSON). Do **not** put a `ref_images` dict in the committed JSON (0 refs until submit wires it). Default prompt documents `<Picture 1>` … `<Picture 6>` in the locked blue-then-yellow front/side/back order.
 
 - [ ] **Step 1: Write lock tests first**
 
 Add to `tests/unit/test_workflow_lock.py` (keep the existing FL2VA tests and their forbidden list, including `ref2va` and `MiniMaxH3ReferenceToVideo` **only on the FL2VA files**):
 
 ```python
-def test_ref2va_smoke_and_default():
+REF2VA_GRAPHS = (
+    "h3-ref2va-smoke-5s17.json",
+    "h3-ref2va-default-8s.json",
+    "h3-ref2va-long-15s08.json",
+)
+
+
+def test_ref2va_smoke_default_and_long():
     smoke = load("h3-ref2va-smoke-5s17.json")
     default = load("h3-ref2va-default-8s.json")
+    long = load("h3-ref2va-long-15s08.json")
     assert 124 in int_inputs(smoke, "length")
     assert 192 not in int_inputs(smoke, "length")
+    assert 362 not in int_inputs(smoke, "length")
     assert 192 in int_inputs(default, "length")
     assert 124 not in int_inputs(default, "length")
-    for name in ("h3-ref2va-smoke-5s17.json", "h3-ref2va-default-8s.json"):
+    assert 362 not in int_inputs(default, "length")
+    assert 362 in int_inputs(long, "length")
+    assert 124 not in int_inputs(long, "length")
+    assert 192 not in int_inputs(long, "length")
+    assert 360 not in int_inputs(long, "length")
+    assert 361 not in int_inputs(long, "length")
+    for name in REF2VA_GRAPHS:
         raw = (ROOT / "workflows" / name).read_text()
         g = load(name)
         assert 960 in int_inputs(g, "width")
@@ -566,6 +802,8 @@ def test_ref2va_smoke_and_default():
         assert "triton_ref" in raw
         assert "H3 Safe" in raw or "H3Safe" in raw
         assert "ModelSamplingAV" in raw
+        assert "<Picture 1>" in raw
+        assert "<Picture 6>" in raw
         for bad in (
             "EasyCache",
             "flex_attention",
@@ -583,6 +821,15 @@ def test_ref2va_smoke_and_default():
             if node.get("class_type") == "LoadImage"
         ]
         assert titles == [f"ref_image_{i}" for i in range(6)]
+        ref2va_nodes = [
+            node
+            for node in prompt_graph(g).values()
+            if node.get("class_type") == "MiniMaxH3ReferenceToVideo"
+        ]
+        assert len(ref2va_nodes) == 1
+        assert "ref_images" not in (ref2va_nodes[0].get("inputs") or {})
+        for key in (ref2va_nodes[0].get("inputs") or {}):
+            assert not str(key).startswith("ref_image_"), key
 
 
 def test_fl2va_graphs_still_forbid_ref2va():
@@ -599,14 +846,22 @@ def test_fl2va_graphs_still_forbid_ref2va():
 python3 -m pytest tests/unit/test_workflow_lock.py -v
 ```
 
-- [ ] **Step 3: Build the two JSON files**
+- [ ] **Step 3: Build the three JSON files**
 
-Copy `workflows/h3-fl2va-default-8s.json` to both new names, then apply **all** of these edits (smoke uses `length` 124; default uses 192):
+Copy `workflows/h3-fl2va-default-8s.json` to all three new names, then apply **all** of these edits. Only `length` and `filename_prefix` differ across the three files.
 
-1. Node `1` `unet_name` → `minimax_h3_ref2va_pruned_fp8_scaled.safetensors`
-2. Node `5` `lora_name` → `minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors`
-3. Node `13` `steps` → `4`
-4. Replace node `10` with:
+1. Node `1` `_meta.title` → `Load Ref2VA DiT (D-15 FP8)` and `unet_name` → `minimax_h3_ref2va_pruned_fp8_scaled.safetensors`
+2. Node `5` `_meta.title` → `Comfy-Org Ref2V Turbo 4-step LoRA` and `lora_name` → `minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors`
+3. Node `13` `_meta.title` → `simple scheduler: 4 steps / 5 sigma points (includes final zero)` and `steps` → `4`
+4. Replace node `10` with the block below. Use the `length` / `filename_prefix` row for that file.
+
+`workflows/h3-ref2va-smoke-5s17.json` — `"length": 124`, SaveVideo `filename_prefix` `h3-ref2va-smoke`.
+
+`workflows/h3-ref2va-default-8s.json` — `"length": 192`, SaveVideo `filename_prefix` `h3-ref2va`.
+
+`workflows/h3-ref2va-long-15s08.json` — `"length": 362`, SaveVideo `filename_prefix` `h3-ref2va-15s08`.
+
+Smoke node `10`:
 
 ```json
 "10": {
@@ -618,7 +873,28 @@ Copy `workflows/h3-fl2va-default-8s.json` to both new names, then apply **all** 
     "clip": ["2", 0],
     "vae": ["3", 0],
     "audio_vae": ["4", 0],
-    "prompt": "<Picture 1> is the blue monk parakeet identity. <Picture 2> is the yellow monk parakeet identity. A quiet scene. No speech.",
+    "prompt": "<Picture 1> <Picture 2> <Picture 3> are front, side, and back stills of the blue monk parakeet. <Picture 4> <Picture 5> <Picture 6> are front, side, and back stills of the yellow monk parakeet. Printed Front/Side/Back words are captions, not plumage. A quiet scene. No speech.",
+    "width": 960,
+    "height": 544,
+    "length": 124,
+    "ref_image_size": "match"
+  }
+}
+```
+
+Default node `10` (same keys; only `length` changes):
+
+```json
+"10": {
+  "class_type": "MiniMaxH3ReferenceToVideo",
+  "_meta": {
+    "title": "Ref2VA condition + AV latent"
+  },
+  "inputs": {
+    "clip": ["2", 0],
+    "vae": ["3", 0],
+    "audio_vae": ["4", 0],
+    "prompt": "<Picture 1> <Picture 2> <Picture 3> are front, side, and back stills of the blue monk parakeet. <Picture 4> <Picture 5> <Picture 6> are front, side, and back stills of the yellow monk parakeet. Printed Front/Side/Back words are captions, not plumage. A quiet scene. No speech.",
     "width": 960,
     "height": 544,
     "length": 192,
@@ -627,40 +903,198 @@ Copy `workflows/h3-fl2va-default-8s.json` to both new names, then apply **all** 
 }
 ```
 
-(Smoke file: `"length": 124`.)
+Long node `10`:
 
-5. Add LoadImage nodes `24`–`29`:
+```json
+"10": {
+  "class_type": "MiniMaxH3ReferenceToVideo",
+  "_meta": {
+    "title": "Ref2VA condition + AV latent"
+  },
+  "inputs": {
+    "clip": ["2", 0],
+    "vae": ["3", 0],
+    "audio_vae": ["4", 0],
+    "prompt": "<Picture 1> <Picture 2> <Picture 3> are front, side, and back stills of the blue monk parakeet. <Picture 4> <Picture 5> <Picture 6> are front, side, and back stills of the yellow monk parakeet. Printed Front/Side/Back words are captions, not plumage. A quiet scene. No speech.",
+    "width": 960,
+    "height": 544,
+    "length": 362,
+    "ref_image_size": "match"
+  }
+}
+```
+
+5. Add LoadImage nodes `24`–`29` to **every** Ref2VA file (unlinked until `submit-prompt.py` writes `ref_images`):
 
 ```json
 "24": {
   "class_type": "LoadImage",
   "_meta": { "title": "ref_image_0" },
   "inputs": { "image": "example.png" }
+},
+"25": {
+  "class_type": "LoadImage",
+  "_meta": { "title": "ref_image_1" },
+  "inputs": { "image": "example.png" }
+},
+"26": {
+  "class_type": "LoadImage",
+  "_meta": { "title": "ref_image_2" },
+  "inputs": { "image": "example.png" }
+},
+"27": {
+  "class_type": "LoadImage",
+  "_meta": { "title": "ref_image_3" },
+  "inputs": { "image": "example.png" }
+},
+"28": {
+  "class_type": "LoadImage",
+  "_meta": { "title": "ref_image_4" },
+  "inputs": { "image": "example.png" }
+},
+"29": {
+  "class_type": "LoadImage",
+  "_meta": { "title": "ref_image_5" },
+  "inputs": { "image": "example.png" }
 }
 ```
 
-Same for `25`–`29` with titles `ref_image_1` … `ref_image_5`. They stay **unlinked** until `submit-prompt.py` writes `ref_images`.
-
-6. Keep nodes 6–9, 11–23, SPAN crop, SaveVideo. Default `filename_prefix`: `h3-ref2va` (smoke: `h3-ref2va-smoke`).
-7. Do not add `first_frame` / `last_frame`. Do not add EasyCache / `flex_attention` / NVFP4.
+6. Keep nodes 6–9, 11–23, SPAN crop, SaveVideo. Set `filename_prefix` as in the length table above.
+7. Do not add `first_frame` / `last_frame`. Do not add EasyCache / `flex_attention` / NVFP4. Do not add a `ref_images` key. Do not write host paths into `LoadImage.image`.
 
 - [ ] **Step 4: Point smoke-test.sh at the Ref2VA 5.17 s graph by default**
 
-In `scripts/smoke-test.sh`:
-
-- Add `--workflow PATH` (optional)
-- Default `WORKFLOW` to `$ROOT/workflows/h3-ref2va-smoke-5s17.json`
-- Keep `--offline-mp4` behavior unchanged (no workflow read)
-- Forward `--ref-image` the same way `--first-frame` is forwarded today
-
-Live invocation becomes:
+Replace `scripts/smoke-test.sh` with this file (offline probe unchanged; live default is the Ref2VA 5.17 graph; `--workflow` and `--ref-image` are first-class):
 
 ```bash
-./scripts/smoke-test.sh --prompt "<Picture 1> A quiet kitchen." --seed 42 --name smoke-ref2va-5s17 \
-  --ref-image "$HOME/h3-data/blue.png"
+#!/usr/bin/env bash
+# Submit a locked 5.17 s smoke graph, or probe an existing mp4.
+# Exit 0 only if the file has a video stream and stereo audio (ffprobe audio,2).
+# --offline-mp4: probe only. Do not test -f the workflow, call submit-prompt, or start Docker.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+WORKFLOW="$ROOT/workflows/h3-ref2va-smoke-5s17.json"
+SUBMIT="$ROOT/scripts/submit-prompt.sh"
+
+OFFLINE_MP4=""
+PROMPT=""
+SEED=""
+NAME=""
+FORWARD=()
+
+usage() {
+  echo "usage: $0 --offline-mp4 <path>" >&2
+  echo "       $0 --prompt TEXT --seed N --name PREFIX [--workflow PATH] [submit-prompt flags]" >&2
+  exit 2
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --offline-mp4)
+      OFFLINE_MP4="${2:?usage: --offline-mp4 <path>}"
+      shift 2
+      ;;
+    --workflow)
+      WORKFLOW="${2:?}"
+      shift 2
+      ;;
+    --prompt)
+      PROMPT="${2:?}"
+      shift 2
+      ;;
+    --seed)
+      SEED="${2:?}"
+      shift 2
+      ;;
+    --name)
+      NAME="${2:?}"
+      shift 2
+      ;;
+    --first-frame|--last-frame|--base-url|--output-root|--ref-image)
+      FORWARD+=("$1" "${2:?}")
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      usage
+      ;;
+  esac
+done
+
+probe_mp4() {
+  local mp4="$1"
+  if [[ ! -f "$mp4" ]]; then
+    echo "error: mp4 not found: $mp4" >&2
+    exit 1
+  fi
+  local video audio
+  video="$(
+    ffprobe -v error -select_streams v:0 -show_entries stream=codec_type \
+      -of csv=p=0 "$mp4"
+  )"
+  audio="$(
+    ffprobe -v error -select_streams a:0 -show_entries stream=codec_type,channels \
+      -of csv=p=0 "$mp4"
+  )"
+  if [[ "$video" != "video" ]]; then
+    echo "FAIL: missing video stream (got ${video:-empty})" >&2
+    exit 1
+  fi
+  if [[ "$audio" != "audio,2" ]]; then
+    echo "FAIL: expected stereo audio,2 (got ${audio:-empty})" >&2
+    exit 1
+  fi
+}
+
+if [[ -n "$OFFLINE_MP4" ]]; then
+  probe_mp4 "$OFFLINE_MP4"
+  exit 0
+fi
+
+if [[ ! -f "$WORKFLOW" ]]; then
+  echo "error: missing workflow $WORKFLOW" >&2
+  exit 1
+fi
+if [[ -z "$PROMPT" || -z "$SEED" || -z "$NAME" ]]; then
+  echo "error: live mode requires --prompt --seed --name" >&2
+  exit 2
+fi
+
+set +e
+out="$("$SUBMIT" "$WORKFLOW" --prompt "$PROMPT" --seed "$SEED" --name "$NAME" ${FORWARD[@]+"${FORWARD[@]}"})"
+rc=$?
+set -e
+if [[ "$rc" -ne 0 ]]; then
+  printf '%s\n' "$out"
+  exit "$rc"
+fi
+
+printf '%s\n' "$out"
+
+mp4=""
+while IFS= read -r line; do
+  case "$line" in
+    OUTPUT\ *)
+      mp4="${line#OUTPUT }"
+      ;;
+  esac
+done <<< "$out"
+
+if [[ -z "$mp4" ]]; then
+  echo "error: submit-prompt.sh did not print OUTPUT <path>" >&2
+  exit 1
+fi
+
+probe_mp4 "$mp4"
 ```
 
-Do **not** run that live command in this task.
+`chmod 0755 scripts/smoke-test.sh`
+
+Do **not** run a live generate in this task. Do **not** run the 15.08 graph here.
 
 - [ ] **Step 5: Run lock tests**
 
@@ -674,15 +1108,16 @@ Expected: PASS.
 
 ```bash
 git add workflows/h3-ref2va-smoke-5s17.json workflows/h3-ref2va-default-8s.json \
-  tests/unit/test_workflow_lock.py scripts/smoke-test.sh
+  workflows/h3-ref2va-long-15s08.json tests/unit/test_workflow_lock.py \
+  scripts/smoke-test.sh
 git commit -m "$(cat <<'EOF'
-Lock Ref2VA 5.17 s and 8.00 s graphs next to the FL2VA pair.
+Lock Ref2VA 5.17 s, 8.00 s, and 15.08 s graphs next to the FL2VA pair.
 
 EOF
 )"
 ```
 
-Then parent close-out.
+Then parent close-out (copy **Parent close-out**).
 
 ---
 
@@ -744,7 +1179,8 @@ Do not add a new weight volume.
 
 ```
     && test -f /opt/h3/workflows/h3-ref2va-smoke-5s17.json \
-    && test -f /opt/h3/workflows/h3-ref2va-default-8s.json
+    && test -f /opt/h3/workflows/h3-ref2va-default-8s.json \
+    && test -f /opt/h3/workflows/h3-ref2va-long-15s08.json
 ```
 
 - [ ] **Step 4: Re-run entrypoint tests**
@@ -767,7 +1203,7 @@ EOF
 )"
 ```
 
-Then parent close-out. **Still do not recreate the container** until Task 7.
+Then parent close-out (copy **Parent close-out**). **Still do not recreate the container** until Task 7.
 
 ---
 
@@ -779,25 +1215,46 @@ Then parent close-out. **Still do not recreate the container** until Task 7.
 - Modify: `design/operator.md` (default graph, `--ref-image`, `H3_TASK`, `/upload/image`, no `<Picture N>` on FL2VA)
 - Modify: `design/container.md` (required start set is shared + Ref2VA; FL2VA optional on disk)
 - Modify: `design/README.md` (D-01…D-15; point at this plan)
-- Modify: `AGENTS.md` (Generate a video table: default = `workflows/h3-ref2va-default-8s.json`; FL2VA still listed; `--ref-image`; still no negative prompt)
-- Modify: `workflows/README.md` (four locked graphs; Ref2VA pair may contain `<Picture N>` and `MiniMaxH3ReferenceToVideo`)
+- Modify: `AGENTS.md` (Generate a video table: default = `workflows/h3-ref2va-default-8s.json`; add the 15.08 row; replace “Do not add a third graph”; FL2VA still listed; `--ref-image`; still no negative prompt)
+- Modify: `README.md` (same “Do not add a third graph” replacement; five locked graphs)
+- Modify: `workflows/README.md` (five locked graphs: two FL2VA + three Ref2VA; Ref2VA files may contain `<Picture N>` and `MiniMaxH3ReferenceToVideo`)
 - Modify: `scripts/README.md`
 - Modify: `deploy/README.md` (default generate command uses the Ref2VA 8 s graph)
 - Modify: `docs/design/*.html` to match the markdown (same content, no new stack)
 
 **Interfaces:**
 - Consumes: D-15 text from this plan’s “Decision lock”
-- Produces: docs that tell an agent to default to Ref2VA and how to select FL2VA
+- Produces: docs that tell an agent to default to Ref2VA 8.00 s, how to select the 15.08 s graph, and how to select FL2VA
 
 - [ ] **Step 1: Write D-15 into `design/decisions.md`**
 
-Copy the “Decision lock (D-15)” section from this plan into a card with Status **adopted for implementation**. Include the file table, 4-step reason, how to select FL2VA, and Rejected list.
+Copy the “Decision lock (D-15)” section from this plan into a card with Status **adopted for implementation**. Include the file table, the 5.17 / 8.00 / **15.08** length table, 4-step reason, how to select FL2VA, how to select the 15.08 graph, and the Rejected list (15.00 / 15.04 graphs, composite sheet as primary smoke, FL2V LoRA on Ref2VA).
 
 - [ ] **Step 2: Update AGENTS.md generate table**
 
-Replace the “Pick a locked workflow” table so the **default / about 8 seconds** row is `workflows/h3-ref2va-default-8s.json`. Keep the FL2VA 8 s and 5.17 s rows as “text-only / no identity images”. Add `--ref-image` to the inputs table (optional, host files, uploaded). State that 3-view sheets are Ref2VA identity, **not** `first_frame`.
+Replace the “Pick a locked workflow” table **and** the sentence `Do not add a third graph.` with:
+
+```markdown
+| User ask | File | Length |
+|---|---|---|
+| Default / “about 8 seconds” | `workflows/h3-ref2va-default-8s.json` | **8.00 s / 192** |
+| Fast smoke / “about 5 seconds” | `workflows/h3-ref2va-smoke-5s17.json` | **5.17 s / 124** |
+| “15 seconds” / “15.04 s” / “about 15 seconds” | `workflows/h3-ref2va-long-15s08.json` | **15.08 s / 362** |
+| Text-only / no identity images, about 8 seconds | `workflows/h3-fl2va-default-8s.json` | **8.00 s / 192** |
+| Text-only fast smoke | `workflows/h3-fl2va-smoke-5s17.json` | **5.17 s / 124** |
+
+Snap “15 s” / “15.04 s” to **15.08 s / 362**. Never invent **15.00** or **15.04**. If they say “10 seconds,” snap to **10.13 s** or refuse. Never invent **10.00 s**. There is no locked 10.13 s JSON in this repo — refuse or ask them to accept 8.00 s.
+```
+
+Add `--ref-image` to the inputs table (optional, host files, uploaded via `POST /upload/image`, max 9, this product locks 6 LoadImage titles). State that identity stills are Ref2VA `--ref-image` + `<Picture N>` tags, **not** `first_frame`. Do not write `<Picture N>` on FL2VA graphs.
 
 - [ ] **Step 3: Update the other markdown files listed above**
+
+In root `README.md` replace `Use the two locked workflows… Do not add a third graph.` with: five locked graphs (the AGENTS table), default generate is Ref2VA 8.00 s, ~15 s uses `h3-ref2va-long-15s08.json`.
+
+In `workflows/README.md` list all five JSON filenames. Allow `<Picture N>` and `MiniMaxH3ReferenceToVideo` **only** on the three Ref2VA files.
+
+Copy the D-15 length table (5.17 / 8.00 / 15.08) into `design/operator.md` and `design/architecture.md` (Ref2VA is now a shipped default generate path, not “we do not ship first”).
 
 Do not claim a live Ref2VA mp4 exists yet.
 
@@ -806,7 +1263,7 @@ Do not claim a live Ref2VA mp4 exists yet.
 - [ ] **Step 5: Commit only**
 
 ```bash
-git add design AGENTS.md workflows/README.md scripts/README.md \
+git add design AGENTS.md README.md workflows/README.md scripts/README.md \
   deploy/README.md docs/design
 git commit -m "$(cat <<'EOF'
 Document Ref2VA as the default task and keep FL2VA selectable.
@@ -815,7 +1272,7 @@ EOF
 )"
 ```
 
-Then parent close-out.
+Then parent close-out (copy **Parent close-out**).
 
 ---
 
@@ -827,7 +1284,13 @@ Then parent close-out.
 - Consumes: Task 2 weights on the host (`--task all`), Task 5 compose/entrypoint/Dockerfile, Task 4 JSON copied into the image
 - Produces: `h3-spark:local` rebuilt; container recreated with `H3_TASK=ref2va`; `/system_stats` 200
 
-The operator asked for this change, so this task **may** `docker compose down` / `build` / `up -d`. Do it once. Do not restart again for Task 8.
+The operator asked for this change, so this task **may** `docker compose down` / `build` / `up -d`. Do it once. Do not restart again for Task 8 or Task 9. If a leftover ComfyUI job is on the GPU before `down`, free it first:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8188/interrupt || true
+```
+
+(`|| true` is allowed here only because the server may already be down. Do not use `|| true` on unit tests.) Do not start a second ComfyUI.
 
 - [ ] **Step 1: Confirm host weights**
 
@@ -856,6 +1319,19 @@ docker compose -f deploy/compose.yaml ps
 
 Expected: JSON with `cuda:0 NVIDIA GB10`; service `Up`.
 
+Confirm the image copied all three Ref2VA graphs:
+
+```bash
+docker compose -f deploy/compose.yaml exec -T comfyui \
+  test -f /opt/h3/workflows/h3-ref2va-smoke-5s17.json
+docker compose -f deploy/compose.yaml exec -T comfyui \
+  test -f /opt/h3/workflows/h3-ref2va-default-8s.json
+docker compose -f deploy/compose.yaml exec -T comfyui \
+  test -f /opt/h3/workflows/h3-ref2va-long-15s08.json
+```
+
+Expected: three silent exits 0.
+
 - [ ] **Step 4: Confirm both UNETs are now in the combo**
 
 ```bash
@@ -882,44 +1358,101 @@ EOF
 )"
 ```
 
-If nothing changed in git, do not create an empty commit. Then parent close-out (`curl /system_stats` is the re-smoke).
+If nothing changed in git, do not create an empty commit. Then parent close-out (copy **Parent close-out**; `curl /system_stats` is the re-smoke).
 
 ---
 
-### Task 8: Live Ref2VA smoke, then prove FL2VA is still selectable
+### Task 8: Live Ref2VA 5.17 s (both birds), then prove FL2VA is still selectable
 
 **Files:**
-- None required. Optional: a line in `measurements/prereq.md` for the live Ref2VA smoke, modeled on the existing Task 10 FL2VA paragraph.
+- None required. Optional: a line in `measurements/prereq.md` for the live Ref2VA 5.17 s smoke, modeled on the existing FL2VA Task 10 paragraph.
 
 **Interfaces:**
-- Consumes: running server from Task 7, `workflows/h3-ref2va-smoke-5s17.json`, `--ref-image`
-- Produces: host mp4 under `~/h3-output` with video + stereo audio; FL2VA graph still accepted by `/prompt` validation
+- Consumes: running server from Task 7, `workflows/h3-ref2va-smoke-5s17.json`, six `$HOME/h3-data/*.jpg` files, `--ref-image`
+- Produces: host mp4 `~/h3-output/smoke-ref2va-5s17_00001_.mp4` with video + stereo audio; FL2VA graph still accepted by `/prompt` validation. Does **not** run the 15.08 graph.
 
-- [ ] **Step 1: Put a reference still in `~/h3-data`**
-
-Use any real PNG/JPEG the operator cares about (the blue 3-view sheet is fine for this smoke). Example:
+Do **not** restart ComfyUI. If a leftover job holds the GPU:
 
 ```bash
-mkdir -p "$HOME/h3-data"
-# copy the operator's blue 3-view into $HOME/h3-data/blue-3view.jpg
-test -f "$HOME/h3-data/blue-3view.jpg"
+curl -fsS -X POST http://127.0.0.1:8188/interrupt
 ```
 
-Do not commit the image.
+Do not start a second ComfyUI. Do not `docker compose down` / `up`.
 
-- [ ] **Step 2: Live Ref2VA 5.17 s**
+- [ ] **Step 1: Crop the six operator stills into `$HOME/h3-data`**
 
-Do **not** restart ComfyUI.
+Do not commit these JPEGs. Decision E: drop the 80 px caption footer.
 
 ```bash
+ASSET="/home/xiaohui_chen/.cursor/projects/home-xiaohui-chen-Projects-minimax-h3-dgx-spark/assets"
+mkdir -p "$HOME/h3-data"
+
+crop_ref() {
+  local src="$1" dest="$2"
+  test -f "$src"
+  ffmpeg -y -i "$src" -vf "crop=iw:ih-80:0:0" "$dest"
+}
+
+crop_ref "$ASSET/78E74295-FF28-40F5-9002-C3AAFF8608E3_3-b4506c74-a621-488f-842a-f474247bcd5a.jpg" \
+  "$HOME/h3-data/blue-front.jpg"
+crop_ref "$ASSET/78E74295-FF28-40F5-9002-C3AAFF8608E3_2-963ed79f-7e20-4cd9-8474-1a282c80c508.jpg" \
+  "$HOME/h3-data/blue-side.jpg"
+crop_ref "$ASSET/78E74295-FF28-40F5-9002-C3AAFF8608E3-27107fe0-4aad-44f5-b78c-f82b7a204def.jpg" \
+  "$HOME/h3-data/blue-back.jpg"
+crop_ref "$ASSET/A54A17AE-824F-4899-B252-54DF46DE1340_3-2d36df87-8570-44c7-be8f-4507298db573.jpg" \
+  "$HOME/h3-data/yellow-front.jpg"
+crop_ref "$ASSET/A54A17AE-824F-4899-B252-54DF46DE1340_2-09becfd0-dd8a-4da8-b974-fdd279d9b37a.jpg" \
+  "$HOME/h3-data/yellow-side.jpg"
+crop_ref "$ASSET/A54A17AE-824F-4899-B252-54DF46DE1340-91af16e7-ae0f-4714-993f-7719229ec008.jpg" \
+  "$HOME/h3-data/yellow-back.jpg"
+
+for f in blue-front blue-side blue-back yellow-front yellow-side yellow-back; do
+  test -f "$HOME/h3-data/${f}.jpg"
+done
+```
+
+- [ ] **Step 2: Live Ref2VA 5.17 s with both birds**
+
+Do **not** restart ComfyUI. Do **not** run `h3-ref2va-long-15s08.json` here.
+
+```bash
+PROMPT="$(cat <<'EOF'
+subject_definitions:
+<Subject 1> is the blue monk parakeet whose appearance comes from <Picture 1> (front), <Picture 2> (side), and <Picture 3> (back): powder-blue wings and tail, silvery-grey face and scalloped breast, horn-colored hooked beak, grey feet. Any printed word Front, Side, or Back at the bottom of those stills is a studio caption, not plumage, not a perch, and must not appear in the video.
+<Subject 2> is the yellow monk parakeet whose appearance comes from <Picture 4> (front), <Picture 5> (side), and <Picture 6> (back): bright yellow wings and tail, creamy-yellow face and chest, horn-colored hooked beak, pale feet, a small red leg band. The same printed Front/Side/Back captions are labels only and must not appear.
+
+summary:
+A 5.17-second quiet indoor two-shot of both parakeets on one pale wooden perch. Identity is taken from all six stills. No speech and no lyric music.
+
+retention_analysis:
+<Subject 1> (whole clip): fully_preserved — keep the blue mutation colors, beak, and body shape from <Picture 1>, <Picture 2>, and <Picture 3>.
+<Subject 2> (whole clip): fully_preserved — keep the yellow mutation colors, beak, red band, and body shape from <Picture 4>, <Picture 5>, and <Picture 6>.
+Printed captions: not preserved.
+
+detailed_description:
+[Shot 1] 0.00-5.17s. Medium two-shot, eye-level, a very slow gentle push-in. Soft morning window light, a plain white wall, one pale wooden perch. <Subject 1> sits on the left end of the perch and <Subject 2> sits on the right, a hand-width of empty perch between them. They face slightly toward each other. <Subject 1> blinks and shifts its weight. <Subject 2> turns its head and takes one small hop closer. Feathers stay the studio colors. No on-screen text, logos, or caption bars.
+
+overall_soundscape:
+Quiet furnished room. Soft stereo room tone, a faint distant HVAC hush, one or two tiny claw clicks on wood. No speech, no spoken words, no song with lyrics.
+
+non_diegetic_music:
+None.
+EOF
+)"
+
 ./scripts/smoke-test.sh \
-  --prompt "<Picture 1> is the only bird. A quiet kitchen, morning light. No speech. Soft room tone only." \
+  --prompt "$PROMPT" \
   --seed 42 \
   --name smoke-ref2va-5s17 \
-  --ref-image "$HOME/h3-data/blue-3view.jpg"
+  --ref-image "$HOME/h3-data/blue-front.jpg" \
+  --ref-image "$HOME/h3-data/blue-side.jpg" \
+  --ref-image "$HOME/h3-data/blue-back.jpg" \
+  --ref-image "$HOME/h3-data/yellow-front.jpg" \
+  --ref-image "$HOME/h3-data/yellow-side.jpg" \
+  --ref-image "$HOME/h3-data/yellow-back.jpg"
 ```
 
-Wait for `OUTPUT /home/xiaohui_chen/h3-output/smoke-ref2va-5s17_00001_.mp4` (SaveVideo suffix). Then:
+Wait for `OUTPUT /home/xiaohui_chen/h3-output/smoke-ref2va-5s17_00001_.mp4` (SaveVideo suffix; jobs take minutes; poll timeout is already 3600 s). Then:
 
 ```bash
 ./scripts/smoke-test.sh --offline-mp4 "$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4"
@@ -957,12 +1490,18 @@ try:
                 urllib.request.urlopen(del_req, timeout=10).read()
             except Exception as exc:
                 print("queue delete skipped", exc)
+                int_req = urllib.request.Request(
+                    "http://127.0.0.1:8188/interrupt",
+                    data=b"",
+                    method="POST",
+                )
+                urllib.request.urlopen(int_req, timeout=10).read()
 except urllib.error.HTTPError as exc:
     raise SystemExit(exc.read().decode())
 PY
 ```
 
-Expected: HTTP 200 and empty `node_errors` (UNET name is on disk). If `/queue` delete is not supported on this ComfyUI, **do not** leave a surprise 5.17 s job running — interrupt via `POST /interrupt` and tell the operator.
+Expected: HTTP 200 and empty `node_errors` (UNET name is on disk). If `/queue` delete is not supported, the script already `POST`s `/interrupt`. Do not leave a surprise FL2VA job running.
 
 If the operator explicitly wants a live FL2VA re-smoke, use the existing command (do not invent a graph):
 
@@ -983,7 +1522,100 @@ EOF
 )"
 ```
 
-Then parent close-out. Do not commit the mp4.
+Then parent close-out (copy **Parent close-out**). Do not commit the mp4 or the `$HOME/h3-data` JPEGs.
+
+---
+
+### Task 9: Live Ref2VA 15.08 s (both birds)
+
+**Files:**
+- None required. Optional: a second line in `measurements/prereq.md` for the 15.08 s wall-clock.
+
+**Interfaces:**
+- Consumes: the same running ComfyUI from Task 7 (do **not** rebuild or restart), `workflows/h3-ref2va-long-15s08.json`, the six `$HOME/h3-data/*.jpg` files from Task 8
+- Produces: host mp4 `~/h3-output/smoke-ref2va-15s08_00001_.mp4` with 24 fps video + stereo audio
+
+Do **not** restart ComfyUI. If a leftover job holds the GPU:
+
+```bash
+curl -fsS -X POST http://127.0.0.1:8188/interrupt
+```
+
+Do not start a second ComfyUI. Do not invent a new process. `submit-prompt.py` already polls `/history/<id>` every 2 s with a 3600 s timeout — a 15.08 s job is minutes-to-tens-of-minutes, not a new serving path.
+
+- [ ] **Step 1: Confirm the six cropped stills still exist**
+
+```bash
+for f in blue-front blue-side blue-back yellow-front yellow-side yellow-back; do
+  test -f "$HOME/h3-data/${f}.jpg"
+done
+```
+
+If any file is missing, re-run Task 8 Step 1 (crop only). Do not start Task 9 without all six.
+
+- [ ] **Step 2: Live 15.08 s / 362-frame generate**
+
+```bash
+PROMPT="$(cat <<'EOF'
+subject_definitions:
+<Subject 1> is the blue monk parakeet whose appearance comes from <Picture 1> (front), <Picture 2> (side), and <Picture 3> (back): powder-blue wings and tail, silvery-grey face and scalloped breast, horn-colored hooked beak, grey feet. Any printed word Front, Side, or Back at the bottom of those stills is a studio caption, not plumage, not a perch, and must not appear in the video.
+<Subject 2> is the yellow monk parakeet whose appearance comes from <Picture 4> (front), <Picture 5> (side), and <Picture 6> (back): bright yellow wings and tail, creamy-yellow face and chest, horn-colored hooked beak, pale feet, a small red leg band. The same printed Front/Side/Back captions are labels only and must not appear.
+
+summary:
+A 15.08-second quiet indoor two-shot of both parakeets sharing one pale wooden perch in morning light. Identity is taken from all six stills. No speech and no lyric music.
+
+retention_analysis:
+<Subject 1> (whole clip): fully_preserved — keep the blue mutation colors, beak, and body shape from <Picture 1>, <Picture 2>, and <Picture 3>.
+<Subject 2> (whole clip): fully_preserved — keep the yellow mutation colors, beak, red band, and body shape from <Picture 4>, <Picture 5>, and <Picture 6>.
+Printed captions: not preserved.
+
+detailed_description:
+[Shot 1] 0.00-5.00s. Wide-to-medium, eye-level, static then a very slow dolly in. Soft morning side-window light, a plain white wall, one pale wooden perch. <Subject 1> sits on the left, <Subject 2> on the right. Both look around the quiet room. No on-screen text.
+[Shot 2] 5.00-10.00s. Hold a closer two-shot. <Subject 1> preens one wing feather. <Subject 2> hops one step toward <Subject 1> and settles. They glance at each other. No fighting, no flight off the perch.
+[Shot 3] 10.00-15.08s. Hold the two-shot. Both birds stay on the perch with small natural head turns and blinks, then still. End with both faces visible. No captions.
+
+overall_soundscape:
+Quiet furnished room. Soft stereo room tone, occasional claw ticks on wood, a brief feather rustle when <Subject 1> preens. No speech, no spoken words, no song with lyrics.
+
+non_diegetic_music:
+None.
+EOF
+)"
+
+./scripts/submit-prompt.sh workflows/h3-ref2va-long-15s08.json \
+  --prompt "$PROMPT" \
+  --seed 42 \
+  --name smoke-ref2va-15s08 \
+  --ref-image "$HOME/h3-data/blue-front.jpg" \
+  --ref-image "$HOME/h3-data/blue-side.jpg" \
+  --ref-image "$HOME/h3-data/blue-back.jpg" \
+  --ref-image "$HOME/h3-data/yellow-front.jpg" \
+  --ref-image "$HOME/h3-data/yellow-side.jpg" \
+  --ref-image "$HOME/h3-data/yellow-back.jpg"
+```
+
+Wait for `OUTPUT /home/xiaohui_chen/h3-output/smoke-ref2va-15s08_00001_.mp4`.
+
+- [ ] **Step 3: Offline mp4 check**
+
+```bash
+./scripts/smoke-test.sh --offline-mp4 "$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4"
+```
+
+Expected: exit 0, `ffprobe` video stream + `audio,2`. Record wall-clock in `measurements/prereq.md` if you touch that file.
+
+- [ ] **Step 4: Commit measurements only if you wrote them**
+
+```bash
+git add measurements/prereq.md
+git commit -m "$(cat <<'EOF'
+Record the live Ref2VA 15.08 s smoke on this Spark.
+
+EOF
+)"
+```
+
+If nothing changed in git, do not create an empty commit. Then parent close-out (copy **Parent close-out**). Do not commit the mp4.
 
 ---
 
@@ -995,22 +1627,24 @@ Then parent close-out. Do not commit the mp4.
 |---|---|
 | Default start = Ref2VA weights | 1, 5, 7 |
 | User can still specify FL2VA | 2 (`--task all`), 4 (graphs kept), 5 (`H3_TASK=fl2va`), 6 (docs), 8 (validation) |
-| 3-view / identity images | 3 (`--ref-image`), 4 (LoadImage titles), 6 (AGENTS) |
+| Six identity stills + `<Picture N>` | 3 (`--ref-image`), 4 (six LoadImage titles on all three graphs), 6 (AGENTS), 8–9 (live) |
 | Nested autogrow only | 3 tests + feasibility table |
-| No first_frame-as-3view | 6, Global Constraints |
-| Same canvas / kernels / no NVFP4 | 4 lock tests |
-| Docker image change | 5, 7 |
-| Live proof | 8 |
+| No first_frame-as-3view | 6, Global Constraints, Operator amendment C |
+| Same canvas / kernels / no NVFP4 / 4-step Ref2VA | 4 lock tests |
+| Docker image change | 5, 7 (`test -f` the 15.08 JSON) |
+| Live 5.17 s two-bird proof | 8 |
+| Live 15.08 s / 362 two-bird proof | **9** |
+| AGENTS generate table lists 15.08; old “no third graph” gone | 6 |
+| Adversarial fix + push every task | Parent close-out |
 
-**Placeholder scan:** no TBD / “implement later”.
+**Placeholder scan:** no TBD / “implement later” / “similar to Task 4”.
 
-**Type consistency:** `H3_TASK` is `ref2va|fl2va` at start; `check-weights --task` also allows `all`; downloader defaults to `all`; `--ref-image` uploads to `LoadImage.image` filenames; `ref_images` is `dict[str, [node_id, 0]]`.
+**Type consistency:** `H3_TASK` is `ref2va|fl2va` at start; `check-weights --task` also allows `all`; downloader defaults to `all`; `--ref-image` uploads to `LoadImage.image` filenames; `ref_images` is `dict[str, [node_id, 0]]`; long graph `length` is int **362**; `--name smoke-ref2va-15s08` → host `smoke-ref2va-15s08_00001_.mp4`.
 
 ## Execution handoff
 
-Plan complete and saved to `docs/superpowers/plans/2026-08-23-h3-ref2va-default.md`. Two execution options:
+Already chosen — **Subagent-Driven Development, continuous, no human check-in**.
 
-1. **Subagent-Driven (recommended)** — I dispatch a fresh subagent per task (`cursor-grok-4.6-xhigh-fast`), review between tasks, close-out + push
-2. **Inline Execution** — execute tasks in this session using executing-plans, with checkpoints
+Parent: `superpowers:subagent-driven-development`. Fresh implementer per task on `cursor-grok-4.6-xhigh-fast`, then **Parent close-out** (spec → fixer if needed → adversarial reviewer **and fixer** → re-smoke → `git push -u origin HEAD`). Do not use executing-plans. Do not implement in the parent’s own context. Do not stop between tasks unless BLOCKED.
 
-Which approach?
+Plan file: `docs/superpowers/plans/2026-08-23-h3-ref2va-default.md`. Branch: `feat/h3-ref2va-default`. Do not start Task 1 in the same turn as this amendment.
