@@ -75,3 +75,80 @@ def test_forbidden_and_required_strings():
         assert "minimax_h3_fl2va_pruned_fp8_scaled" in raw
         assert "qwen3vl_32b_minimax_h3_int8_convrot" in raw
         assert span_name in raw
+
+
+REF2VA_GRAPHS = (
+    "h3-ref2va-smoke-5s17.json",
+    "h3-ref2va-default-8s.json",
+    "h3-ref2va-long-15s08.json",
+)
+
+
+def test_ref2va_smoke_default_and_long():
+    smoke = load("h3-ref2va-smoke-5s17.json")
+    default = load("h3-ref2va-default-8s.json")
+    long = load("h3-ref2va-long-15s08.json")
+    assert 124 in int_inputs(smoke, "length")
+    assert 192 not in int_inputs(smoke, "length")
+    assert 362 not in int_inputs(smoke, "length")
+    assert 192 in int_inputs(default, "length")
+    assert 124 not in int_inputs(default, "length")
+    assert 362 not in int_inputs(default, "length")
+    assert 362 in int_inputs(long, "length")
+    assert 124 not in int_inputs(long, "length")
+    assert 192 not in int_inputs(long, "length")
+    assert 360 not in int_inputs(long, "length")
+    assert 361 not in int_inputs(long, "length")
+    for name in REF2VA_GRAPHS:
+        raw = (ROOT / "workflows" / name).read_text()
+        g = load(name)
+        assert 960 in int_inputs(g, "width")
+        assert 544 in int_inputs(g, "height")
+        assert 4 in int_inputs(g, "steps")
+        assert 8 not in int_inputs(g, "steps")
+        assert "MiniMaxH3ReferenceToVideo" in raw
+        assert "minimax_h3_ref2va_pruned_fp8_scaled" in raw
+        assert "minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16" in raw
+        assert "qwen3vl_32b_minimax_h3_int8_convrot" in raw
+        assert "triton_ref" in raw
+        assert "H3 Safe" in raw or "H3Safe" in raw
+        assert "ModelSamplingAV" in raw
+        assert "<Picture 1>" in raw
+        assert "<Picture 6>" in raw
+        for bad in (
+            "EasyCache",
+            "flex_attention",
+            "lowvram",
+            "nvfp4",
+            "minimax_h3_fl2va_pruned_fp8_scaled",
+            "minimax_h3_fl2v_turbo_8step",
+            "minimax_h3_ref2va_pruned_int8_convrot",
+            "MiniMaxH3ImageToVideo",
+        ):
+            assert bad not in raw, bad
+        titles = [
+            (node.get("_meta") or {}).get("title")
+            for node in prompt_graph(g).values()
+            if node.get("class_type") == "LoadImage"
+        ]
+        assert titles == [f"ref_image_{i}" for i in range(6)]
+        ref2va_nodes = [
+            node
+            for node in prompt_graph(g).values()
+            if node.get("class_type") == "MiniMaxH3ReferenceToVideo"
+        ]
+        assert len(ref2va_nodes) == 1
+        ref_inputs = ref2va_nodes[0].get("inputs") or {}
+        assert "ref_images" not in ref_inputs
+        assert ref_inputs.get("ref_image_size") == "match"
+        for key in ref_inputs:
+            # ref_image_size is required; only flat autogrow keys (ref_image_0 …) are forbidden.
+            assert key == "ref_image_size" or not str(key).startswith("ref_image_"), key
+
+
+def test_fl2va_graphs_still_forbid_ref2va():
+    for name in ("h3-fl2va-smoke-5s17.json", "h3-fl2va-default-8s.json"):
+        raw = (ROOT / "workflows" / name).read_text()
+        assert "MiniMaxH3ReferenceToVideo" not in raw
+        assert "ref2va" not in raw
+        assert "<Picture " not in raw

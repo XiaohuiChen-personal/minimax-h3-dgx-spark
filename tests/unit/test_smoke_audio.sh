@@ -76,7 +76,7 @@ LIVE="$TMP/live"
 mkdir -p "$LIVE/scripts" "$LIVE/workflows"
 cp "$SMOKE" "$LIVE/scripts/smoke-test.sh"
 chmod +x "$LIVE/scripts/smoke-test.sh"
-: > "$LIVE/workflows/h3-fl2va-smoke-5s17.json"
+: > "$LIVE/workflows/h3-ref2va-smoke-5s17.json"
 cat > "$LIVE/scripts/submit-prompt.sh" <<EOF
 #!/usr/bin/env bash
 if [[ "\${H3_SMOKE_SUBMIT_FAIL:-}" == "1" ]]; then
