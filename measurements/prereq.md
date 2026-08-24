@@ -381,3 +381,75 @@ python main.py --listen 0.0.0.0 --port 8188 --fast fp8_matrix_mult --disable-pin
 ```
 
 `grep -E -- 'lowvram|novram|use-sage-attention' /tmp/h3-ps.txt` → no match. **PASS**.
+
+---
+
+## Task 11 — Live 8.00 s default (after Task 10 smoke PASS)
+
+ComfyUI was already up (`deploy-comfyui-1`, `h3-spark:local`, port 8188, same `python main.py` PID from Task 10). Did **not** start, restart, or kill it.
+
+```
+./scripts/submit-prompt.sh workflows/h3-fl2va-default-8s.json \
+  --prompt "A quiet kitchen, morning light, a glass of water on the table." \
+  --seed 42 \
+  --name default-8s
+```
+
+| | |
+|---|---|
+| Result | **PASS** (video stream + `audio,2`; `smoke-test.sh --offline-mp4` exit 0) |
+| Start (UTC) | `2026-08-24T00:54:51Z` (`1787532891.067839495`) |
+| End (UTC) | `2026-08-24T00:59:37Z` (`1787533177.710202662`) |
+| Wall-clock | **286.642 s** (client `date +%s.%N`) |
+| ComfyUI | `Prompt executed in 286.38 seconds` |
+| Host output | `/home/xiaohui_chen/h3-output/default-8s_00001_.mp4` (SaveVideo suffix; not `default-8s.mp4`) |
+| Bytes | `2883451` |
+| History | `1baa5bef-f247-4320-a7d3-d3905e07b7f6` `status_str=success` |
+
+Printed `OUTPUT /home/xiaohui_chen/h3-output/default-8s_00001_.mp4` (host path, not `/opt/ComfyUI/output/…`).
+
+`argv` (unchanged): `main.py --listen 0.0.0.0 --port 8188 --fast fp8_matrix_mult --disable-pinned-memory`.
+
+### Audio / video probe
+
+`ffprobe -hide_banner "$HOME/h3-output/default-8s_00001_.mp4"` (stream lines):
+
+```
+Duration: 00:00:08.00, start: 0.000000, bitrate: 2883 kb/s
+Stream #0:0: Video: h264 (High) (avc1), yuv420p, 1920x1080, 24 fps
+Stream #0:1: Audio: aac (LC) (mp4a), 32000 Hz, stereo, fltp, 127 kb/s
+```
+
+Contract probes:
+
+```
+$ ffprobe -v error -select_streams v:0 -show_entries stream=codec_type -of csv=p=0 ...
+video
+$ ffprobe -v error -select_streams a:0 -show_entries stream=codec_type,channels -of csv=p=0 ...
+audio,2
+```
+
+`channels=2`, `channel_layout=stereo`, `nb_frames` video **192**, duration **8.00 s**. Whole-file `ffmpeg -af astats` (not last-frame `reset=1`): **Number of NaNs: 0** / Infs 0. Overall RMS **-34.29 dB**, peak **-15.93 dB** (quiet kitchen, no speech in the prompt — not silent-NaN). Per-channel RMS **-34.30 / -34.28 dB**. A last-window `reset=1` pair (−54.07 Overall / −53.12 / −55.30 per channel) is AAC tail, not Overall. `volumedetect` mean **−34.3 dB**, max **−15.9 dB**.
+
+`./scripts/smoke-test.sh --offline-mp4 "$HOME/h3-output/default-8s_00001_.mp4"` → exit 0.
+
+### Sage / Sol-Attn (must not hide fallback)
+
+Patch nodes `1`–`9` / `11`–`13` / `18` were `execution_cached` from the Task 10 graph (same checkpoints / Sage / Sol-Attn / FBC / SPAN loader). This run reprinted:
+
+```
+MiniMax H3 FBCache enabled: H3 Safe — 0.08 / max 2
+MiniMax H3 FBCache: cached 0/8 steps; estimated block-stack speedup 1.00x; residual diff min/median/max 0.16211/0.21289/0.49414
+```
+
+Sampler: step 1 **28.47 s** (model init), then **~19.5–20.8 s/it**; `8/8 [02:39, 19.97s/it]` (5.17 s smoke was **~11.4 s/it**). No import failure. First-boot `Using pytorch attention` is still the pre-graph default. First generate (Task 10) had already printed `Using sage attention mode: sageattn_qk_int8_pv_fp16_triton` and `[MiniMax H3 Sol] patched 50 of 50`. This 8.00 s log did **not** reprint `[MiniMax H3 Sol] active (N tokens)` because node 8 was cached; the live model still showed **208 patches attached**. Do not treat the missing second `active` line as a hidden fallback.
+
+### Pins (also in `deploy/README.md`)
+
+```
+BASE_IMAGE=nvcr.io/nvidia/pytorch:25.12-py3
+COMFYUI_SHA=b78cec879b9460d5cb25228a83a942fb78d2cd24
+SPAN_FILE=upscale_models/2x-spanx2-ch48.pth
+```
+
+Start: `docker compose -f deploy/compose.yaml up -d`. No `H3_LICENSE_ACK`. Speed log: `measurements/download-log.md`.

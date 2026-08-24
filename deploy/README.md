@@ -6,6 +6,7 @@ Pins recorded at implement time (Task 1 / Task 5 / Task 9). Do not float on `mas
 |---|---|
 | `BASE_IMAGE` | `nvcr.io/nvidia/pytorch:25.12-py3` |
 | `COMFYUI_SHA` | `b78cec879b9460d5cb25228a83a942fb78d2cd24` |
+| `SPAN_FILE` | `upscale_models/2x-spanx2-ch48.pth` |
 | Image | `h3-spark:local` |
 | Platform | `linux/arm64` |
 | SageAttention | **2.2.0** (`eb615cf6cf4d221338033340ee2de1c37fbdba4a`, tag `v2.2.0`) |
@@ -16,6 +17,8 @@ Pins recorded at implement time (Task 1 / Task 5 / Task 9). Do not float on `mas
 Official SageAttention 2.2.0 `SUPPORTED_ARCHS` includes `12.0` and not `12.1`. The image compiles with `TORCH_CUDA_ARCH_LIST=12.0` (sm_120 SASS; the documented GB10 path for unmodified 2.2.0). The `sageattention3_blackwell` tree is deleted before `pip install` so SageAttention 3 is not in the image.
 
 Design of the mounts and start path: [`../design/container.md`](../design/container.md). Compose **subfolder** binds win over any whole-`models` sketch.
+
+Download and image-build timings vs the 8 Gbps (1000 MB/s) ceiling: [`../measurements/download-log.md`](../measurements/download-log.md).
 
 ## Host folders (D-14)
 
@@ -39,6 +42,16 @@ curl -fsS http://127.0.0.1:8188/system_stats
 ```
 
 Leave ComfyUI up. Do not restart it for every video.
+
+```bash
+# default 8.00 s / 192 frames — server must already be up
+./scripts/submit-prompt.sh workflows/h3-fl2va-default-8s.json \
+  --prompt "A quiet kitchen, morning light, a glass of water on the table." \
+  --seed 42 \
+  --name default-8s
+```
+
+SaveVideo writes a suffixed host path under `$HOME/h3-output` (for example `default-8s_00001_.mp4`), not `/opt/ComfyUI/output/…`. Do not set `H3_LICENSE_ACK`.
 
 MiniMax H3 Community License (documentation only, not a start lock): https://platform.minimax.io/h3-license
 

@@ -51,8 +51,10 @@ Create this tree **before** the first `compose up`. The download script (next im
   loras/
     minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors
   upscale_models/
-    <SPAN 2× checkpoint — record the exact filename in the download script>
+    2x-spanx2-ch48.pth
 ```
+
+`SPAN_FILE` is `upscale_models/2x-spanx2-ch48.pth` (official 2× SPAN ch48; OpenModelDB). Mount that **subfolder** only.
 
 Source for the MiniMax files: [huggingface.co/Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3).
 
