@@ -92,7 +92,18 @@ if [[ -z "$PROMPT" || -z "$SEED" || -z "$NAME" ]]; then
   exit 2
 fi
 
+set +e
 out="$("$SUBMIT" "$WORKFLOW" --prompt "$PROMPT" --seed "$SEED" --name "$NAME" ${FORWARD[@]+"${FORWARD[@]}"})"
+rc=$?
+set -e
+if [[ "$rc" -ne 0 ]]; then
+  printf '%s\n' "$out"
+  exit "$rc"
+fi
+
+# Task 4 contract: show OUTPUT <host-path> (or the whole submit stdout) before probe.
+printf '%s\n' "$out"
+
 mp4=""
 while IFS= read -r line; do
   case "$line" in
@@ -104,7 +115,6 @@ done <<< "$out"
 
 if [[ -z "$mp4" ]]; then
   echo "error: submit-prompt.sh did not print OUTPUT <path>" >&2
-  printf '%s\n' "$out" >&2
   exit 1
 fi
 

@@ -33,28 +33,70 @@ video_only_probe="$(ffprobe -v error -select_streams a:0 -show_entries stream=co
 [[ -z "$video_only_probe" ]]
 
 # Offline must not require the Task 7 workflow JSON, submit-prompt.sh, or Docker.
-# Hide them so a stray test -f / exec would fail this unit run.
-mkdir -p "$TMP/bin"
+# A PATH stub of submit-prompt.sh is not coverage: the real script uses $ROOT/scripts/...
+# Copy smoke-test.sh into a tree with no workflows/ and no scripts/submit-prompt.sh.
+ISOLATED="$TMP/isolated"
+mkdir -p "$ISOLATED/scripts" "$TMP/bin"
+cp "$SMOKE" "$ISOLATED/scripts/smoke-test.sh"
+chmod +x "$ISOLATED/scripts/smoke-test.sh"
+[[ ! -e "$ISOLATED/workflows" ]]
+[[ ! -e "$ISOLATED/scripts/submit-prompt.sh" ]]
+ISOLATED_SMOKE="$ISOLATED/scripts/smoke-test.sh"
+
+cat > "$TMP/bin/docker" <<'EOF'
+#!/usr/bin/env bash
+echo "docker must not run in --offline-mp4 mode" >&2
+exit 99
+EOF
 cat > "$TMP/bin/submit-prompt.sh" <<'EOF'
 #!/usr/bin/env bash
 echo "submit-prompt.sh must not run in --offline-mp4 mode" >&2
 exit 99
 EOF
-chmod +x "$TMP/bin/submit-prompt.sh"
-# Prefer a PATH tripwire; the real script must not exec submit-prompt at all.
+chmod +x "$TMP/bin/docker" "$TMP/bin/submit-prompt.sh"
 export PATH="$TMP/bin:$PATH"
 
-"$SMOKE" --offline-mp4 "$TMP/stereo-tone.mp4"
+# Isolation tripwire: this copy has no Task 7/9 files. Stereo must still exit 0.
+"$ISOLATED_SMOKE" --offline-mp4 "$TMP/stereo-tone.mp4"
 
+# Keep stereo PASS / video-only FAIL / mono FAIL on the isolated copy.
 # Do not pipe the checker under pipefail: a FAIL exit 1 is the assertion.
-if out="$("$SMOKE" --offline-mp4 "$TMP/silent-video-only.mp4" 2>&1)"; then
+if out="$("$ISOLATED_SMOKE" --offline-mp4 "$TMP/silent-video-only.mp4" 2>&1)"; then
   echo "expected failure on video-only mp4"; exit 1
 fi
 printf '%s\n' "$out" | grep -q 'audio,2'
 
-if out="$("$SMOKE" --offline-mp4 "$TMP/mono-tone.mp4" 2>&1)"; then
+if out="$("$ISOLATED_SMOKE" --offline-mp4 "$TMP/mono-tone.mp4" 2>&1)"; then
   echo "expected failure on mono mp4"; exit 1
 fi
 printf '%s\n' "$out" | grep -q 'audio,1'
+
+# Live mode must reprint submit-prompt.sh stdout (OUTPUT on success, error JSON on failure).
+LIVE="$TMP/live"
+mkdir -p "$LIVE/scripts" "$LIVE/workflows"
+cp "$SMOKE" "$LIVE/scripts/smoke-test.sh"
+chmod +x "$LIVE/scripts/smoke-test.sh"
+: > "$LIVE/workflows/h3-fl2va-smoke-5s17.json"
+cat > "$LIVE/scripts/submit-prompt.sh" <<EOF
+#!/usr/bin/env bash
+if [[ "\${H3_SMOKE_SUBMIT_FAIL:-}" == "1" ]]; then
+  printf '%s\n' '{"error":"prompt rejected"}'
+  exit 7
+fi
+echo "OUTPUT $TMP/stereo-tone.mp4"
+exit 0
+EOF
+chmod +x "$LIVE/scripts/submit-prompt.sh"
+LIVE_SMOKE="$LIVE/scripts/smoke-test.sh"
+
+live_ok="$("$LIVE_SMOKE" --prompt 'a cat' --seed 1 --name live-ok)"
+printf '%s\n' "$live_ok" | grep -q "^OUTPUT $TMP/stereo-tone.mp4\$"
+
+set +e
+live_fail="$(H3_SMOKE_SUBMIT_FAIL=1 "$LIVE_SMOKE" --prompt 'a cat' --seed 1 --name live-fail 2>&1)"
+live_rc=$?
+set -e
+[[ "$live_rc" -eq 7 ]]
+printf '%s\n' "$live_fail" | grep -q 'prompt rejected'
 
 echo OK
