@@ -12,4 +12,9 @@ grep -q -- '--disable-pinned-memory' "$ENTRY"
 if grep -E -- 'lowvram|novram|use-sage-attention|H3_LICENSE_ACK' "$ENTRY"; then
   echo "forbidden flag or license gate in entrypoint"; exit 1
 fi
+grep -q 'H3_TASK' "$ENTRY"
+grep -q -- '--task' "$ENTRY"
+if grep -E -- 'lowvram|novram|use-sage-attention|H3_LICENSE_ACK' "$ENTRY"; then
+  echo "forbidden flag or license gate in entrypoint"; exit 1
+fi
 echo OK

@@ -167,7 +167,10 @@ COPY workflows /opt/h3/workflows
 RUN chmod 0755 /opt/h3/scripts/entrypoint.sh /opt/h3/scripts/check-weights.sh \
     && test -f /opt/h3/scripts/required-weights.txt \
     && test -f /opt/h3/workflows/h3-fl2va-smoke-5s17.json \
-    && test -f /opt/h3/workflows/h3-fl2va-default-8s.json
+    && test -f /opt/h3/workflows/h3-fl2va-default-8s.json \
+    && test -f /opt/h3/workflows/h3-ref2va-smoke-5s17.json \
+    && test -f /opt/h3/workflows/h3-ref2va-default-8s.json \
+    && test -f /opt/h3/workflows/h3-ref2va-long-15s08.json
 
 WORKDIR /opt/ComfyUI
 EXPOSE 8188
