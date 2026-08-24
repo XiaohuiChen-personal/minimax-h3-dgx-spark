@@ -7,7 +7,7 @@ Published URL: https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/
 | `index.html` | Site hub |
 | `briefing.html` | Research briefing (evidence) |
 | `design/architecture.html` | Plain-language pipeline |
-| `design/decisions.html` | D-01…D-14 |
+| `design/decisions.html` | D-01…D-15 |
 | `design/optimizations.html` | Speed-ups and bans |
 | `design/operator.html` | How a person and an agent use the server |
 | `design/container.html` | Image contract and deploy steps |
