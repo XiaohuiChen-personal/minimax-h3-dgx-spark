@@ -286,3 +286,98 @@ Do **not** float on `master` in the image. Clone that SHA.
 ## Task 7 notes
 
 Locked graphs call `PathchSageAttentionKJ` (`sage_attention=sageattn_qk_int8_pv_fp16_triton`). Task 9 must clone `kijai/ComfyUI-KJNodes`. Do not install SageAttention 3 (`sageattn3` is a separate combo and is not selected).
+
+---
+
+## Task 10 — Live 5.17 s smoke (first generate)
+
+ComfyUI was already up (`deploy-comfyui-1`, `h3-spark:local`, port 8188). Did **not** start, restart, or kill it.
+
+```
+./scripts/smoke-test.sh \
+  --prompt "A quiet kitchen, morning light, a glass of water on the table." \
+  --seed 42 \
+  --name smoke-5s17
+```
+
+| | |
+|---|---|
+| Result | **PASS** (video stream + `audio,2`; `smoke-test.sh` exit 0) |
+| Start (UTC) | `2026-08-24T00:42:34Z` (`1787532154.473227988`) |
+| End (UTC) | `2026-08-24T00:45:44Z` (`1787532344.849787210`) |
+| Wall-clock | **190.377 s** (client `date +%s.%N`) |
+| ComfyUI | `Prompt executed in 190.08 seconds` |
+| Host output | `/home/xiaohui_chen/h3-output/smoke-5s17_00001_.mp4` (SaveVideo suffix; not `smoke-5s17.mp4`) |
+| Bytes | `1522226` |
+
+`argv` (unchanged): `main.py --listen 0.0.0.0 --port 8188 --fast fp8_matrix_mult --disable-pinned-memory`.
+
+### Audio / video probe
+
+`ffprobe -hide_banner "$HOME/h3-output/smoke-5s17_00001_.mp4"` (stream lines):
+
+```
+Duration: 00:00:05.17, start: 0.000000, bitrate: 2356 kb/s
+Stream #0:0: Video: h264 (High) (avc1), yuv420p, 1920x1080, 24 fps
+Stream #0:1: Audio: aac (LC) (mp4a), 32000 Hz, stereo, fltp, 130 kb/s
+```
+
+Contract probes:
+
+```
+$ ffprobe -v error -select_streams v:0 -show_entries stream=codec_type -of csv=p=0 ...
+video
+$ ffprobe -v error -select_streams a:0 -show_entries stream=codec_type,channels -of csv=p=0 ...
+audio,2
+```
+
+`channels=2`, `channel_layout=stereo`, `nb_frames` video **124**, duration **5.17 s**. `astats` **Number of NaNs: 0** / Infs 0. Overall RMS **-82.29 dB**, peak **-71.03 dB** (quiet kitchen, no speech in the prompt — not silent-NaN).
+
+`./scripts/smoke-test.sh --offline-mp4 "$HOME/h3-output/smoke-5s17_00001_.mp4"` → exit 0.
+
+### Sage / Sol-Attn (must not hide fallback)
+
+Startup import times: FirstBlockCache 0.0 s, `ComfyUI-sol-attn` 0.0 s, KJNodes 0.1 s. No import failure.
+
+In-container: `from sageattention import sageattn_qk_int8_pv_fp16_triton` **ok**; `sageattn3` spec **None**.
+
+First-run logs (not a fallback):
+
+```
+Using sage attention mode: sageattn_qk_int8_pv_fp16_triton
+[MiniMax H3 Sol] patched 50 of 50 attention blocks (tau=1.30, min_tokens=4096, strict=False)
+[MiniMax H3 Sol] active (19299 tokens)
+MiniMax H3 FBCache enabled: H3 Safe — 0.08 / max 2
+MiniMax H3 FBCache: cached 0/8 steps; estimated block-stack speedup 1.00x; residual diff min/median/max 0.16113/0.21191/0.50000
+```
+
+Server boot still prints `Using pytorch attention` (ComfyUI default **before** graph patches). Generate used Sage + Sol-Attn as above.
+
+### Optional FP8 baseline (D-02 reverse line)
+
+`--fast fp8_matrix_mult` was **already on**. Sampler tqdm: step 1 **29.00 s** (model init), then **~11.0–11.7 s/it**; `8/8 [01:31, 11.42s/it]`. Did **not** rerun with the flag removed (would require a ComfyUI restart; that is a manual follow-up).
+
+### Queue check
+
+Submitted the 5.17 s graph twice immediately (`--name smoke-5s17` and `--name smoke-queue`). Snapshot:
+
+```
+running 1 pending 1
+running_id 9a6a1ff2-1721-4414-8cb2-24a2562f5055
+pending_id ee76b02f-6921-4514-a275-a2466931c2bd
+```
+
+Both finished (`execution_cached` on nodes 1–22; SaveVideo remux ~3.97 s / 3.94 s). Host files:
+
+- `/home/xiaohui_chen/h3-output/smoke-5s17_00002_.mp4`
+- `/home/xiaohui_chen/h3-output/smoke-queue_00001_.mp4`
+
+Both offline-probe **PASS** (`audio,2`). `docker compose -f deploy/compose.yaml ps`: **one** container (`deploy-comfyui-1`). Live `ps aux`: **one** `python main.py`. Logs: two extra `got prompt` lines, no second `main.py`.
+
+### Forbidden-flag audit (live process)
+
+```
+python main.py --listen 0.0.0.0 --port 8188 --fast fp8_matrix_mult --disable-pinned-memory
+```
+
+`grep -E -- 'lowvram|novram|use-sage-attention' /tmp/h3-ps.txt` → no match. **PASS**.
