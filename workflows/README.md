@@ -1,6 +1,6 @@
 # `workflows/` — locked ComfyUI graphs
 
-Empty on purpose until implementation. An implementing agent writes **exactly these two files** from this design. Do not add a third “experimental” graph in the first drop.
+These two locked graphs are already in the tree. Do not add a third “experimental” graph. Do not rewrite them from the stock Comfy-Org template.
 
 ```text
 workflows/

@@ -21,7 +21,7 @@ POST http://127.0.0.1:8188/prompt
 ComfyUI (weights already in memory)
       │
       ▼
-output/<name>.mp4     (24 fps + 32 kHz stereo)
+~/h3-output/<name>_00001_.mp4     (24 fps + 32 kHz stereo; SaveVideo suffix)
 ```
 
 - Port **8188**. The web UI is optional (`ssh -L 8188:127.0.0.1:8188`). Agents use the HTTP API.
@@ -32,11 +32,11 @@ This is not a chat model. There is no word-by-word loop.
 
 ## Everyday steps
 
-1. **Leave ComfyUI running.** Start it once (`docker compose up -d` — see [`container.md`](container.md)). Reloading the models is the expensive part.
+1. **Leave ComfyUI running.** Start it once (`docker compose -f deploy/compose.yaml up -d` from the repo root — see [`container.md`](container.md) and [`../deploy/README.md`](../deploy/README.md)). Reloading the models is the expensive part.
 2. **SSH into the Spark** and open Cursor or Claude there.
 3. **Ask for a generate.** Example: “Use the default 8 s workflow. Prompt: … Seed: 42.”
 4. **The agent only changes free fields**, then `POST /prompt` (or calls `scripts/submit-prompt.sh`).
-5. **It waits by polling** `/history/<prompt_id>` for minutes, then returns the path under `output/` (on the host: `~/h3-output`).
+5. **It waits by polling** `/history/<prompt_id>` for minutes, then returns the host path under `~/h3-output` (SaveVideo suffix, for example `default-8s_00001_.mp4`).
 
 A second `POST /prompt` while one job is running **queues**. That is fine.
 
@@ -59,7 +59,7 @@ The JSON is a shopping list. The hard work is inside one sampler node.
 
 6. Expand numbers back to frames and stereo sound.
 7. SPAN 2× to 1920×1088, crop to 1080p.
-8. Write `output/<name>.mp4`.
+8. Write `~/h3-output/<name>_00001_.mp4` (SaveVideo suffix; there is no unsuffixed `<name>.mp4`).
 
 ## Fixed vs free
 
@@ -122,10 +122,10 @@ Do not start Docker, do not `docker compose restart`, and do not `kill` ComfyUI 
 - Switch the graph to Ref2VA for a normal first/last-frame generate
 - Start a second ComfyUI because the first job is “taking too long”
 
-## Not built yet
+## What is already shipped
 
-- ComfyUI image and host install
+- ComfyUI image `h3-spark:local` and `deploy/compose.yaml`
 - `workflows/h3-fl2va-smoke-5s17.json` and `workflows/h3-fl2va-default-8s.json`
 - `scripts/submit-prompt.sh` (and friends)
 
-Until those exist, this page is the contract, not a button you can press.
+Generate only if ComfyUI is already up on 8188. Do not invent a second serving path. Start commands: [`../deploy/README.md`](../deploy/README.md).

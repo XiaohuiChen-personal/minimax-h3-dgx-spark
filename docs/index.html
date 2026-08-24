@@ -33,14 +33,14 @@
     </div>
     <h1>MiniMax H3 on DGX&nbsp;Spark</h1>
     <p class="standfirst">
-      Research is published. The design is filled in so an agent can implement the
-      pipeline and the Docker image. The end goal is: SSH into a Spark, ask an agent,
-      get an mp4. One GPU job at a time.
+      Research is published. The design, locked graphs, and <code>h3-spark:local</code>
+      image exist. The product is: SSH into a Spark, ask an agent, get an mp4.
+      One GPU job at a time. ComfyUI stays up on 8188.
     </p>
     <div class="legend">
       <div><span class="chip c-m">Research</span> published</div>
       <div><span class="chip c-m">Design</span> filled in</div>
-      <div><span class="chip c-s">Implement</span> not started</div>
+      <div><span class="chip c-m">Implement</span> shipped</div>
     </div>
   </div>
 </header>
@@ -97,10 +97,10 @@
       <div class="stack tight phase">
         <span class="n">01</span><strong>Design</strong><span class="chip c-m">Done</span>
         <span></span><span>Architecture, decisions, optimizations, operator, container — filled in.</span><span></span>
-        <span class="n">02</span><strong>Implement</strong><span class="chip c-p">Next</span>
-        <span></span><span>Workflows, submit/poll scripts, Dockerfile, compose file.</span><span></span>
-        <span class="n">03</span><strong>Smoke test</strong><span class="chip c-s">After that</span>
-        <span></span><span>One 5.17 s clip at 960×544 with stereo audio on this Spark.</span><span></span>
+        <span class="n">02</span><strong>Implement</strong><span class="chip c-m">Shipped</span>
+        <span></span><span>Locked workflows, submit/poll scripts, Dockerfile, compose file.</span><span></span>
+        <span class="n">03</span><strong>Generate</strong><span class="chip c-m">Recorded</span>
+        <span></span><span>5.17 s smoke and 8.00 s default mp4s on this Spark (stereo). Server must already be up.</span><span></span>
       </div>
     </div>
     <div class="box compute">

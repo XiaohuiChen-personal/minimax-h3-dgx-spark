@@ -1,6 +1,6 @@
 # Design — what to build
 
-These notes are the contract. An implementing agent should be able to read them and then write the workflows, scripts, and Docker image **without inventing a new stack**.
+These notes are the contract. The shipped workflows, scripts, and Docker image must keep following them **without inventing a new stack**.
 
 Read in this order:
 

@@ -1,6 +1,6 @@
 # `scripts/` — helpers the image and the agent call
 
-Empty on purpose. Write these at implement time. Follow [`../design/container.md`](../design/container.md), [`../design/operator.md`](../design/operator.md), and the implementation plan — where the plan is more specific (CLI, mounts, tests), the plan wins.
+These helpers are already in the tree. Follow [`../design/container.md`](../design/container.md), [`../design/operator.md`](../design/operator.md), and the implementation plan — where the plan is more specific (CLI, mounts, tests), the plan wins.
 
 | Script | Job |
 |---|---|

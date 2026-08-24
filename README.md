@@ -12,7 +12,7 @@ This repository does **not** host model weights.
 |---|---|---|
 | Research | Understand H3, measure this GB10, pick an operating point | Published |
 | Design | End-to-end contract an agent can implement | Filled in |
-| Implement | Workflows, scripts, Dockerfile | Not started |
+| Implement | Workflows, scripts, Dockerfile | Shipped (`h3-spark:local`, locked graphs) |
 
 **Locked operating point:** generate at `960×544` for **8.00 s** (192 frames), 8 steps, then 2× SPAN to `1920×1088` and crop to 1080p. First smoke test: **5.17 s**.
 
@@ -24,17 +24,17 @@ If you want the **measurements**, read the [research briefing](https://xiaohuich
 
 ## Who this is for
 
-- This machine, while we turn the design into a running image.
+- This machine, now that the image and locked graphs exist.
 - Other DGX Spark users who want the same path without re-deriving quantization, canvas, step count, and ARM64 traps.
 
 ## Repository layout
 
 ```text
-docs/         GitHub Pages: hub, briefing, filled design pages.
-design/       Source of truth for implementers (markdown).
-deploy/       Future Dockerfile and compose.yaml.
-workflows/    Future locked ComfyUI graphs.
-scripts/      Future download, submit/poll, and smoke-test helpers.
+docs/         GitHub Pages: hub, briefing, design pages.
+design/       Source of truth (markdown).
+deploy/       Dockerfile, compose.yaml, start pins.
+workflows/    Locked ComfyUI graphs (5.17 s smoke, 8.00 s default).
+scripts/      Download, check-weights, submit/poll, smoke-test, entrypoint.
 ```
 
 Weights, outputs, and caches stay on the machine. They are gitignored.
@@ -46,14 +46,14 @@ Agent rules (single copy for Cursor, Claude Code, and Codex): [`AGENTS.md`](AGEN
 ```text
 design/*.md  ──already locked──►  docs/design/*.html
         │
-        └──next session──►  workflows/ + scripts/ + deploy/
+        └──already shipped──►  workflows/ + scripts/ + deploy/
 ```
 
 1. Do **not** invent a different model, canvas, or serving stack.
-2. Write the two workflows and the scripts named in [`scripts/README.md`](scripts/README.md).
-3. Write `deploy/Dockerfile` and `deploy/compose.yaml` from [`design/container.md`](design/container.md).
-4. On the Spark: download weights to `~/h3-weights`, then `docker compose up -d`.
-5. Smoke-test 5.17 s. Then the 8.00 s default is allowed.
+2. Use the two locked workflows and the scripts in [`scripts/README.md`](scripts/README.md). Do not add a third graph.
+3. Build and start from [`deploy/README.md`](deploy/README.md): `docker compose -f deploy/compose.yaml up -d` from the **repository root**. Do not `cd deploy` and run a bare `docker compose up`.
+4. On the Spark: download weights into `~/h3-weights` **subfolders**, then start once. Leave ComfyUI up.
+5. If ComfyUI is already up on 8188: smoke 5.17 s, then the 8.00 s default. SaveVideo writes `~/h3-output/<name>_00001_.mp4`, not `<name>.mp4`.
 
 vLLM-Omni is a later option, not the first path ([D-01](design/decisions.md#d-01--comfyui-first)).
 

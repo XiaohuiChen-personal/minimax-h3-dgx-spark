@@ -57,7 +57,7 @@
       <text x="600" y="100" text-anchor="middle" class="dlabel">POST /prompt</text>
       <text x="600" y="118" text-anchor="middle" class="dlabel-s">weights already resident</text>
       <rect x="780" y="50" width="180" height="90" rx="8" class="dbox-cold"/>
-      <text x="870" y="88" text-anchor="middle" class="dhead">output/*.mp4</text>
+      <text x="870" y="88" text-anchor="middle" class="dhead">~/h3-output/*.mp4</text>
       <text x="870" y="110" text-anchor="middle" class="dlabel-s">24 fps + 32 kHz</text>
       <line x1="190" y1="95" x2="230" y2="95" class="dline"/>
       <line x1="420" y1="95" x2="460" y2="95" class="dline-hot"/>
@@ -75,7 +75,7 @@
     <li><strong>SSH into the Spark</strong> and open Cursor or Claude on that machine.</li>
     <li><strong>Ask for a generate</strong> against the default 8.00 s or smoke-test 5.17 s workflow.</li>
     <li><strong>The agent changes only free fields</strong> (prompt, seed, filename, optional first/last-frame image files) and <code>POST</code>s to <code>/prompt</code>.</li>
-    <li><strong>It polls <code>/history/&lt;prompt_id&gt;</code></strong> for minutes, then returns the path under <code>output/</code>.</li>
+    <li><strong>It polls <code>/history/&lt;prompt_id&gt;</code></strong> for minutes, then returns the host path under <code>~/h3-output</code> (SaveVideo suffix, e.g. <code>default-8s_00001_.mp4</code>).</li>
   </ol>
 </section>
 
@@ -173,7 +173,7 @@
   </div>
 </section>
 
-<p class="foot">Working source: <code>design/operator.md</code>. ComfyUI, the locked workflow JSON, and the submit/poll script are not built yet. Until they exist, this page is the contract, not a runnable path. Deploy recipe: <a href="container.html">Container</a>.</p>
+<p class="foot">Working source: <code>design/operator.md</code>. The image, locked workflows, and <code>scripts/submit-prompt.sh</code> are already in the tree. Generate only if ComfyUI is already up on 8188. Deploy recipe: <a href="container.html">Container</a>.</p>
 
 </div>
 </body>
