@@ -32,7 +32,7 @@ Current default-task plan (D-15):
 
 - [`docs/superpowers/plans/2026-08-23-h3-ref2va-default.md`](../docs/superpowers/plans/2026-08-23-h3-ref2va-default.md)
 
-That plan is the implementation path for Ref2VA as default. Locked graphs are in the tree. Do **not** claim a live Ref2VA mp4 exists yet (Task 8/9). Do not invent a different model, canvas, kernel stack, or serving path.
+That plan is the implementation path for Ref2VA as default. Locked graphs are in the tree. Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4`. Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`. Do not invent a different model, canvas, kernel stack, or serving path.
 
 Start commands and pins: [`../deploy/README.md`](../deploy/README.md). Evidence: [`../measurements/prereq.md`](../measurements/prereq.md), [`../measurements/download-log.md`](../measurements/download-log.md).
 

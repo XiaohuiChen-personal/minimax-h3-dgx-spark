@@ -211,7 +211,7 @@ From another terminal on the same Spark (or SSH with `-L 8188:127.0.0.1:8188`):
   --ref-image "$HOME/h3-data/blue-front.jpg"
 ```
 
-Default generate is the Ref2VA **8.00 s** graph. Fast smoke uses `workflows/h3-ref2va-smoke-5s17.json` (5.17 s). Text-only / no identity images uses the FL2VA pair. The script uploads `--ref-image` files, `POST`s to `http://127.0.0.1:8188/prompt`, and polls `/history/<prompt_id>`. Do **not** claim a live Ref2VA mp4 exists yet (Task 8/9).
+Default generate is the Ref2VA **8.00 s** graph. Fast smoke uses `workflows/h3-ref2va-smoke-5s17.json` (5.17 s). Text-only / no identity images uses the FL2VA pair. The script uploads `--ref-image` files, `POST`s to `http://127.0.0.1:8188/prompt`, and polls `/history/<prompt_id>`. Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4`. Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`.
 
 A second submit while the first is running should **queue**, not crash, and not start a second ComfyUI.
 
@@ -244,7 +244,7 @@ Prefer Compose so the mounts stay consistent.
 
 The image, compose file, weight scripts (`download-weights.sh --task`, `check-weights.sh --task`), five locked workflows, `submit-prompt.sh` (`--ref-image`), `smoke-test.sh`, and `deploy/README.md` are already in the tree. Do not rewrite them from a pre-implementation sketch.
 
-Live Ref2VA mp4 proof is Task 8/9. Do **not** claim one exists yet. Do not invent a different model, canvas, or serving stack.
+Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` (5.17 s / 124) and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4` (15.08 s / 362). Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`. Do not invent a different model, canvas, or serving stack.
 
 ## What this image is not
 

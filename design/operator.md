@@ -96,7 +96,7 @@ The agent uploads each still with `POST /upload/image`, then `submit-prompt.py` 
 
 To make **start** require FL2VA weights instead of Ref2VA: `H3_TASK=fl2va` in `deploy/.env` or the compose environment, then recreate the container. Selecting FL2VA for a generate is passing the FL2VA JSON to `submit-prompt.sh`. Both weight sets should already be on disk (`download-weights.sh` defaults to `--task all`).
 
-Do **not** claim a live Ref2VA mp4 exists yet (Task 8/9).
+Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` (5.17 s / 124) and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4` (15.08 s / 362). Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`.
 
 ## HTTP contract the submit script must use
 
@@ -140,6 +140,6 @@ Do not start Docker, do not `docker compose restart`, and do not `kill` ComfyUI 
 - Five locked graphs: FL2VA pair + `h3-ref2va-smoke-5s17.json` / `h3-ref2va-default-8s.json` / `h3-ref2va-long-15s08.json`
 - `scripts/submit-prompt.sh` (and friends), including `--ref-image`
 
-Locked Ref2VA JSON is in the tree. Do **not** claim a live Ref2VA mp4 exists yet.
+Locked Ref2VA JSON is in the tree. Live smokes exist on this Spark at `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4`. Do not commit the mp4s.
 
 Generate only if ComfyUI is already up on 8188. Do not invent a second serving path. Start commands: [`../deploy/README.md`](../deploy/README.md).

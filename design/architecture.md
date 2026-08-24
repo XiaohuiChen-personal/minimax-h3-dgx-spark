@@ -97,7 +97,7 @@ Locked Ref2VA lengths (D-15):
 
 Snap “15 s” / “15.04 s” to **15.08 s / 362**. Never invent **15.00** or **15.04**. 15.08 is not the everyday default.
 
-Do **not** claim a live Ref2VA mp4 exists yet (Task 8/9).
+Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` (5.17 s / 124) and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4` (15.08 s / 362). Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`.
 
 ## Hard rules the hardware and the model both enforce
 

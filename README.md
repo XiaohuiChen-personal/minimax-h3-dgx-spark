@@ -98,7 +98,7 @@ design/*.md  ──already locked──►  docs/design/*.html
 
 3. Build and start from [`deploy/README.md`](deploy/README.md): `docker compose -f deploy/compose.yaml up -d` from the **repository root**. Do not `cd deploy` and run a bare `docker compose up`.
 4. On the Spark: download weights into `~/h3-weights` **subfolders** (`download-weights.sh --task all`), then start once (`H3_TASK=ref2va`). Leave ComfyUI up.
-5. If ComfyUI is already up on 8188: default generate is Ref2VA 8.00 s with `--ref-image` (variable 1–9). SaveVideo writes `~/h3-output/<name>_00001_.mp4`, not `<name>.mp4`. Do **not** claim a live Ref2VA mp4 exists yet.
+5. If ComfyUI is already up on 8188: default generate is Ref2VA 8.00 s with `--ref-image` (variable 1–9). SaveVideo writes `~/h3-output/<name>_00001_.mp4`, not `<name>.mp4`. Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4`. Do not commit the mp4s. Never print `/opt/ComfyUI/output`.
 
 vLLM-Omni is a later option, not the first path ([D-01](design/decisions.md#d-01--comfyui-first)).
 

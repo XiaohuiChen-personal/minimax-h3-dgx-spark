@@ -171,8 +171,8 @@
         <dl class="rec">
           <dt>Select FL2VA</dt><dd>Pass <code>h3-fl2va-default-8s.json</code> (or the 5.17 s smoke) to <code>submit-prompt.sh</code>. Start gate: <code>H3_TASK=fl2va</code> then recreate. Downloader defaults to <code>--task all</code>.</dd>
           <dt>Select ~15 s</dt><dd>Pass <code>h3-ref2va-long-15s08.json</code>. Snap “15 s” / “15.04 s” to <strong>15.08</strong>. Never invent 15.00 / 15.04. Not the default.</dd>
-          <dt>Refs</dt><dd>Variable <strong>1–9</strong> (<code>ref_image_0</code>…<code>ref_image_8</code>). Host files, <code>POST /upload/image</code>. Leftover LoadImages stay unlinked <code>example.png</code>. 10+ fail-close. 0 refs → FL2VA. 3-view sheets are this path, not <code>first_frame</code>. Six-bird smokes are N=6 of 9.</dd>
-          <dt>Not</dt><dd><code>first_frame</code> for 3-view sheets. Composite sheet as primary smoke. 15.00 / 15.04 graphs. FL2V LoRA on Ref2VA. 15.08 as the D-07 default. Live Ref2VA mp4 is not claimed yet.</dd>
+          <dt>Refs</dt><dd>Variable <strong>1–9</strong> (<code>ref_image_0</code>…<code>ref_image_8</code>). Host files, <code>POST /upload/image</code>. Leftover LoadImages stay unlinked <code>example.png</code>. 10+ fail-close. 0 refs → FL2VA. 3-view sheets are this path, not <code>first_frame</code>. Six-bird smokes are N=6 of 9. Live Task 8/9 smokes exist at <code>~/h3-output/smoke-ref2va-5s17_00001_.mp4</code> and <code>~/h3-output/smoke-ref2va-15s08_00001_.mp4</code>. Do not commit the mp4s. SaveVideo adds <code>_00001_</code>. Never print <code>/opt/ComfyUI/output</code>.</dd>
+          <dt>Not</dt><dd><code>first_frame</code> for 3-view sheets. Composite sheet as primary smoke. 15.00 / 15.04 graphs. FL2V LoRA on Ref2VA. 15.08 as the D-07 default.</dd>
         </dl>
       </div>
     </div>

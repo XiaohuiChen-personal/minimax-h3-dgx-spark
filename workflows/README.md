@@ -15,7 +15,7 @@ Default generate is **Ref2VA 8.00 s**. Snap “15 s” / “15.04 s” to `h3-re
 
 `<Picture N>` and `MiniMaxH3ReferenceToVideo` are allowed **only** on the three Ref2VA files. Do not put those tags or that node on the FL2VA pair.
 
-All three Ref2VA graphs ship nine `LoadImage` titles `ref_image_0`…`ref_image_8`. `--ref-image` is variable **1–9**. Leftover `LoadImage` nodes stay unlinked `example.png` and are not in the SaveVideo DAG. Default committed prompts may mention `<Picture 1>`…`<Picture 6>` as the six-bird smoke example (N=6 of 9). Do **not** claim a live Ref2VA mp4 exists yet.
+All three Ref2VA graphs ship nine `LoadImage` titles `ref_image_0`…`ref_image_8`. `--ref-image` is variable **1–9**. Leftover `LoadImage` nodes stay unlinked `example.png` and are not in the SaveVideo DAG. Default committed prompts may mention `<Picture 1>`…`<Picture 6>` as the six-bird smoke example (N=6 of 9). Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4`. Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`.
 
 ## Ref2VA (default task)
 

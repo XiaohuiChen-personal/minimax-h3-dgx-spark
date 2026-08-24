@@ -18,7 +18,7 @@ SSH into this DGX Spark, ask an agent to generate, get an mp4. ComfyUI stays up 
 
 Public repo: `XiaohuiChen-personal/minimax-h3-dgx-spark`. Pages: https://xiaohuichen-personal.github.io/minimax-h3-dgx-spark/
 
-**Status:** ComfyUI image (`h3-spark:local`) and five locked graphs exist (FL2VA pair + Ref2VA 5.17 / 8.00 / 15.08). Generate via `scripts/submit-prompt.sh` and poll `/history/<id>`. Default generate is Ref2VA 8.00 s. Do not invent a new process. Do **not** claim a live Ref2VA mp4 exists until Task 8/9 smokes land.
+**Status:** ComfyUI image (`h3-spark:local`) and five locked graphs exist (FL2VA pair + Ref2VA 5.17 / 8.00 / 15.08). Generate via `scripts/submit-prompt.sh` and poll `/history/<id>`. Default generate is Ref2VA 8.00 s. Do not invent a new process. Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` (5.17 s / 124) and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4` (15.08 s / 362). Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`.
 
 If the user only asked to **make a video**, follow **Generate a video** below. Do not re-run the implementation plan.
 
@@ -127,7 +127,7 @@ Text-only / no identity images (FL2VA 8.00 s, 8 steps — use this for speech):
   --name kitchen-talk
 ```
 
-The script `POST`s `/prompt` and polls `/history/<id>` (2 s, timeout 3600 s). Jobs take **minutes** (warm FL2VA 5.17 s was ~3 min; warm FL2VA 8.00 s was ~5 min on this box). Wait. Do not assume one chat turn is enough. Do **not** claim a live Ref2VA mp4 exists yet.
+The script `POST`s `/prompt` and polls `/history/<id>` (2 s, timeout 3600 s). Jobs take **minutes** (warm FL2VA 5.17 s was ~3 min; warm FL2VA 8.00 s was ~5 min on this box). Wait. Do not assume one chat turn is enough. Live Ref2VA smokes already exist on this Spark at `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4`.
 
 ### 5. Output
 

@@ -121,7 +121,7 @@
     <li><strong>Download weights</strong> into <code>~/h3-weights</code> subfolders (<code>./scripts/download-weights.sh "$HOME/h3-weights" --task all</code>). Also create <code>~/h3-output</code> and <code>~/h3-data</code>.</li>
     <li><strong>Build.</strong> <code>docker compose -f deploy/compose.yaml build</code>. If the image is ~50 GiB, weights were baked in — that is a bug.</li>
     <li><strong>Start once.</strong> <code>docker compose -f deploy/compose.yaml up -d</code>. Wait for port 8188. Leave it up. Do not restart per video.</li>
-    <li><strong>Default generate</strong> is Ref2VA 8.00 s via <code>scripts/submit-prompt.sh workflows/h3-ref2va-default-8s.json</code> plus <code>--ref-image</code> (1–9) only if ComfyUI is already up. Do not claim a live Ref2VA mp4 exists yet. Host path is <code>~/h3-output/&lt;name&gt;_00001_.mp4</code>.</li>
+    <li><strong>Default generate</strong> is Ref2VA 8.00 s via <code>scripts/submit-prompt.sh workflows/h3-ref2va-default-8s.json</code> plus <code>--ref-image</code> (1–9) only if ComfyUI is already up. Live Ref2VA smokes exist on this Spark: <code>~/h3-output/smoke-ref2va-5s17_00001_.mp4</code> and <code>~/h3-output/smoke-ref2va-15s08_00001_.mp4</code>. Do not commit the mp4s. SaveVideo adds <code>_00001_</code>. Never print <code>/opt/ComfyUI/output</code>. Host path is <code>~/h3-output/&lt;name&gt;_00001_.mp4</code>.</li>
     <li><strong>Stop only when you mean to free the GPU.</strong> <code>docker compose -f deploy/compose.yaml down</code> unloads the models.</li>
   </ol>
   <pre class="shell">docker run --gpus all --name h3-comfy \
