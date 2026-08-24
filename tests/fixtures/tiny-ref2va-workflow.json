@@ -1,0 +1,30 @@
+{
+  "10": {
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "inputs": {
+      "prompt": "LOCKED_PLACEHOLDER",
+      "width": 960,
+      "height": 544,
+      "length": 124,
+      "ref_image_size": "match"
+    }
+  },
+  "11": {
+    "class_type": "RandomNoise",
+    "inputs": { "noise_seed": 0 }
+  },
+  "23": {
+    "class_type": "SaveVideo",
+    "inputs": { "filename_prefix": "LOCKED_PLACEHOLDER" }
+  },
+  "24": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "ref_image_0" },
+    "inputs": { "image": "example.png" }
+  },
+  "25": {
+    "class_type": "LoadImage",
+    "_meta": { "title": "ref_image_1" },
+    "inputs": { "image": "example.png" }
+  }
+}

@@ -8,6 +8,8 @@ Patched node input names (scalars only; ComfyUI links like ["4", 0] are skipped)
   filename_prefix      <- --name
   first_frame          <- --first-frame
   last_frame           <- --last-frame
+  LoadImage.image      <- --ref-image (uploaded name, not a host path)
+  MiniMaxH3ReferenceToVideo.ref_images  <- nested dict from --ref-image
 
 Host keyframe paths under $H3_DATA or $HOME/h3-data are rewritten to /data/<rel>
 in the posted graph. The printed OUTPUT path is always a host path under
@@ -21,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -33,6 +36,10 @@ SEED_KEYS = ("seed", "noise_seed")
 NAME_KEYS = ("filename_prefix",)
 FIRST_FRAME_KEYS = ("first_frame",)
 LAST_FRAME_KEYS = ("last_frame",)
+REF2VA_CLASS = "MiniMaxH3ReferenceToVideo"
+MAX_REF_IMAGES = 9
+REF_IMAGE_TITLE_RE = re.compile(r"^ref_image_(\d+)$")
+FLAT_REF_IMAGE_KEY_RE = re.compile(r"^ref_image_\d+$")
 
 # Realistic ComfyUI history outputs are lists of {filename, subfolder, type}.
 # Official SaveVideo PreviewVideo uses images + animated, not a videos key.
@@ -98,6 +105,141 @@ def rewrite_keyframe_path(host_path: str) -> str:
             return "/data"
         return "/data/" + rel.replace(os.sep, "/")
     return host_path
+
+
+def load_image_nodes_by_title(graph: dict[str, Any]) -> list[tuple[str, dict]]:
+    """Return LoadImage nodes titled ref_image_N, sorted by the integer suffix."""
+    found: list[tuple[int, str, dict]] = []
+    for node_id, node in graph.items():
+        if not isinstance(node, dict):
+            continue
+        if node.get("class_type") != "LoadImage":
+            continue
+        meta = node.get("_meta")
+        title = meta.get("title") if isinstance(meta, dict) else None
+        if not isinstance(title, str):
+            continue
+        match = REF_IMAGE_TITLE_RE.fullmatch(title)
+        if not match:
+            continue
+        found.append((int(match.group(1)), str(node_id), node))
+    found.sort(key=lambda item: item[0])
+    return [(node_id, node) for _suffix, node_id, node in found]
+
+
+def _ref2va_nodes(graph: dict[str, Any]) -> list[tuple[str, dict]]:
+    found: list[tuple[str, dict]] = []
+    for node_id, node in graph.items():
+        if isinstance(node, dict) and node.get("class_type") == REF2VA_CLASS:
+            found.append((str(node_id), node))
+    return found
+
+
+def upload_input_image(base_url: str, host_path: str) -> str:
+    """POST a host file to ComfyUI /upload/image. Return the JSON name."""
+    expanded = os.path.abspath(os.path.expanduser(host_path))
+    if not os.path.isfile(expanded):
+        print(f"error: --ref-image file not found: {host_path}", file=sys.stderr)
+        raise SystemExit(1)
+    filename = os.path.basename(expanded).replace('"', "_")
+    with open(expanded, "rb") as fh:
+        file_bytes = fh.read()
+    boundary = "----H3RefImageBoundary" + os.urandom(16).hex()
+    header = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="image"; filename="{filename}"\r\n'
+        "Content-Type: application/octet-stream\r\n"
+        "\r\n"
+    ).encode("utf-8")
+    footer = f"\r\n--{boundary}--\r\n".encode("utf-8")
+    body = header + file_bytes + footer
+    url = f"{base_url.rstrip('/')}/upload/image"
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_S) as resp:
+            status = resp.status
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        print(f"error: --ref-image upload failed: HTTP {exc.code}", file=sys.stderr)
+        print(raw, file=sys.stderr)
+        raise SystemExit(1) from exc
+    except urllib.error.URLError as exc:
+        print(f"error: --ref-image upload failed: {getattr(exc, 'reason', exc)}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    if status != 200:
+        print(f"error: --ref-image upload failed: HTTP {status}", file=sys.stderr)
+        print(raw, file=sys.stderr)
+        raise SystemExit(1)
+    try:
+        parsed: Any = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        print("error: --ref-image upload did not return JSON", file=sys.stderr)
+        print(raw, file=sys.stderr)
+        raise SystemExit(1)
+    name = parsed.get("name") if isinstance(parsed, dict) else None
+    if not name:
+        print("error: --ref-image upload response missing name", file=sys.stderr)
+        print(raw, file=sys.stderr)
+        raise SystemExit(1)
+    return str(name)
+
+
+def wire_ref_images(graph: dict[str, Any], base_url: str, host_paths: list[str]) -> None:
+    """Upload stills, patch LoadImage filenames, write nested ref_images. Fail-close."""
+    if len(host_paths) > MAX_REF_IMAGES:
+        print(f"error: --ref-image accepts at most {MAX_REF_IMAGES} paths", file=sys.stderr)
+        raise SystemExit(1)
+    load_nodes = load_image_nodes_by_title(graph)
+    if len(load_nodes) < len(host_paths):
+        print(
+            "error: --ref-image set but the graph does not have enough "
+            f"LoadImage nodes titled ref_image_* (need {len(host_paths)}, "
+            f"found {len(load_nodes)})",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    ref2va_nodes = _ref2va_nodes(graph)
+    if len(ref2va_nodes) != 1:
+        print(
+            "error: --ref-image set but the graph does not have exactly one "
+            f"{REF2VA_CLASS} node",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    _node_id, ref_node = ref2va_nodes[0]
+    inputs = ref_node.get("inputs")
+    if not isinstance(inputs, dict):
+        print(
+            f"error: --ref-image set but {REF2VA_CLASS} inputs are invalid",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    nested: dict[str, list[Any]] = {}
+    for index, host_path in enumerate(host_paths):
+        load_id, load_node = load_nodes[index]
+        uploaded_name = upload_input_image(base_url, host_path)
+        load_inputs = load_node.setdefault("inputs", {})
+        if not isinstance(load_inputs, dict):
+            print(
+                f"error: --ref-image LoadImage node {load_id} has invalid inputs",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        load_inputs["image"] = uploaded_name
+        nested[f"ref_image_{index}"] = [load_id, 0]
+    for key in list(inputs):
+        if FLAT_REF_IMAGE_KEY_RE.fullmatch(str(key)):
+            del inputs[key]
+    inputs["ref_images"] = nested
 
 
 def default_output_root() -> str:
@@ -211,6 +353,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--first-frame", default=None, help="Optional host first-frame image")
     parser.add_argument("--last-frame", default=None, help="Optional host last-frame image")
     parser.add_argument(
+        "--ref-image",
+        action="append",
+        default=None,
+        help="Host identity still; repeatable (max 9). Uploaded via POST /upload/image.",
+    )
+    parser.add_argument(
         "--base-url",
         default="http://127.0.0.1:8188",
         help="ComfyUI origin (default http://127.0.0.1:8188)",
@@ -261,6 +409,8 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
+    if args.ref_image:
+        wire_ref_images(graph, base, args.ref_image)
 
     status, raw, parsed = http_json("POST", f"{base}/prompt", {"prompt": graph})
     if status != 200 or not isinstance(parsed, dict):
