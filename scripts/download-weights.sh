@@ -5,19 +5,46 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SPEEDLOG="$SCRIPT_DIR/lib/speedlog.sh"
 CHECK="$SCRIPT_DIR/check-weights.sh"
-LIST="$SCRIPT_DIR/required-weights.txt"
 LOG="$REPO_ROOT/measurements/download-log.md"
 
 HF_REPO="Comfy-Org/MiniMax-H3"
 SPAN_REL="upscale_models/2x-spanx2-ch48.pth"
 SPAN_URL="https://objectstorage.us-phoenix-1.oraclecloud.com/n/ax6ygfvpvzka/b/open-modeldb-files/o/2x-spanx2-ch48.pth"
 
-if [[ $# -ne 1 || -z "${1:-}" ]]; then
-  echo "usage: download-weights.sh <dir>" >&2
+usage() {
+  echo "usage: download-weights.sh <dir> [--task ref2va|fl2va|all]" >&2
   exit 1
-fi
+}
 
-DIR="$1"
+DIR=""
+TASK=all
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --task)
+      [[ -n "${2:-}" ]] || usage
+      TASK="$2"; shift 2 ;;
+    -h|--help)
+      usage ;;
+    *)
+      if [[ -z "$DIR" && "$1" != --* ]]; then
+        DIR="$1"; shift
+      else
+        usage
+      fi ;;
+  esac
+done
+[[ -n "$DIR" ]] || usage
+case "$TASK" in
+  ref2va|fl2va|all) ;;
+  *) echo "error: unknown --task $TASK" >&2; exit 1 ;;
+esac
+
+lists=("$SCRIPT_DIR/required-weights-shared.txt")
+case "$TASK" in
+  ref2va) lists+=("$SCRIPT_DIR/required-weights-ref2va.txt") ;;
+  fl2va) lists+=("$SCRIPT_DIR/required-weights-fl2va.txt") ;;
+  all) lists+=("$SCRIPT_DIR/required-weights-ref2va.txt" "$SCRIPT_DIR/required-weights-fl2va.txt") ;;
+esac
 
 command -v hf >/dev/null || { echo "hf not installed; install huggingface_hub CLI"; exit 1; }
 
@@ -160,12 +187,14 @@ fetch_span() {
 }
 
 hf_paths=()
-while IFS= read -r rel || [[ -n "$rel" ]]; do
-  [[ -z "$rel" || "$rel" == \#* ]] && continue
-  if [[ "$rel" != "$SPAN_REL" ]]; then
-    hf_paths+=("$rel")
-  fi
-done < "$LIST"
+for list in "${lists[@]}"; do
+  while IFS= read -r rel || [[ -n "$rel" ]]; do
+    [[ -z "$rel" || "$rel" == \#* ]] && continue
+    if [[ "$rel" != "$SPAN_REL" ]]; then
+      hf_paths+=("$rel")
+    fi
+  done < "$list"
+done
 
 declare -A HF_EXPECTED=()
 if ((${#hf_paths[@]} > 0)); then
@@ -174,13 +203,15 @@ if ((${#hf_paths[@]} > 0)); then
   done < <(expected_hf_bytes "${hf_paths[@]}")
 fi
 
-while IFS= read -r rel || [[ -n "$rel" ]]; do
-  [[ -z "$rel" || "$rel" == \#* ]] && continue
-  if [[ "$rel" == "$SPAN_REL" ]]; then
-    fetch_span
-  else
-    fetch_hf "$rel"
-  fi
-done < "$LIST"
+for list in "${lists[@]}"; do
+  while IFS= read -r rel || [[ -n "$rel" ]]; do
+    [[ -z "$rel" || "$rel" == \#* ]] && continue
+    if [[ "$rel" == "$SPAN_REL" ]]; then
+      fetch_span
+    else
+      fetch_hf "$rel"
+    fi
+  done < "$list"
+done
 
-"$CHECK" "$DIR"
+"$CHECK" "$DIR" --task "$TASK"
