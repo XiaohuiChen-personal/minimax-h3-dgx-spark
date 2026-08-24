@@ -49,6 +49,7 @@ Shipped files that must keep following this design:
 - `workflows/h3-ref2va-smoke-5s17.json`
 - `workflows/h3-ref2va-default-8s.json`
 - `workflows/h3-ref2va-long-15s08.json`
+- `workflows/h3-ref2va-quality-15s08-20step-1344.json`
 - `workflows/h3-fl2va-smoke-5s17.json`
 - `workflows/h3-fl2va-default-8s.json`
 - `scripts/` download (`--task`), check-weights, submit/poll (`--ref-image`), smoke-test

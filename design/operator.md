@@ -47,7 +47,7 @@ The JSON is a shopping list. The hard work is inside one sampler node.
 **Once, before the loop**
 
 1. Load the models if they are not already in memory.
-2. Qwen3-VL reads the text. On Ref2VA, identity stills (`--ref-image`, 1–9) are shown to the same reader. On FL2VA, optional first/last-frame files would also go to Qwen **and** the video VAE — the locked T2V graphs omit those keys today.
+2. Qwen3-VL reads the text. On Ref2VA, identity stills (`--ref-image`, 1–9) are shown to the same reader. On FL2VA, optional first/last-frame files would also go to Qwen **and** the video VAE — the default T2V graphs omit those keys today.
 3. Make an empty video+audio workspace at 960×544 and a legal frame count.
 
 **Four times on Ref2VA (official Ref2V Turbo). Eight times on FL2VA (official FL2V 8-step).**
@@ -63,23 +63,26 @@ The JSON is a shopping list. The hard work is inside one sampler node.
 
 ## Fixed vs free
 
-| Locked in the workflow | Agent may change |
+| Default-graph knobs (change on a copy when needed) | Always free |
 |---|---|
 | D-15 Ref2VA DiT + 4-step LoRA (or D-02 FL2VA when that graph is chosen) | Text prompt |
 | 960×544, SPAN 2×, Euler+simple, shifts 6 / 3 | Seed |
 | Ref2VA **4 steps** / FL2VA **8 steps** | Output filename |
 | Sampler, Sage 2.2, Sol-Attn `triton_ref`, FBC `H3 Safe` | Optional `--ref-image` host files (Ref2VA, variable 1–9) |
-| Length of the chosen locked file | Optional first/last-frame files (rejected on today’s locked FL2VA T2V graphs) |
+| Length of the chosen default file | Optional first/last-frame files (only if that graph has the keys) |
 
-Locked Ref2VA lengths (D-15):
+The optional quality graph (`h3-ref2va-quality-15s08-20step-1344.json`) is the exception: **20 steps**, **1344×768**, no Turbo, no FBC, no SPAN.
+
+Default Ref2VA lengths (D-15). These files are the starting point, not a closed set:
 
 | Role | File | Seconds | Frames (`17n+5`) | `filename_prefix` |
 |---|---|---|---|---|
 | Fast smoke | `workflows/h3-ref2va-smoke-5s17.json` | 5.17 | 124 | `h3-ref2va-smoke` |
 | Default generate | `workflows/h3-ref2va-default-8s.json` | 8.00 | 192 | `h3-ref2va` |
 | Long (optional) | `workflows/h3-ref2va-long-15s08.json` | **15.08** | **362** | `h3-ref2va-15s08` |
+| Quality (optional) | `workflows/h3-ref2va-quality-15s08-20step-1344.json` | **15.08** | **362** | `h3-ref2va-quality-15s08` |
 
-Snap “15 s” / “15.04 s” to **15.08 s / 362**. Never invent **15.00** or **15.04**. If the user says “10 seconds,” snap to **10.13 s** (243 frames) or refuse. Do not invent 10.00 s. Do not invent a new graph for a normal generate. Text-only / no identity images uses `workflows/h3-fl2va-default-8s.json` (or the 5.17 s smoke).
+Snap “15 s” / “15.04 s” to **15.08 s / 362** on the Turbo long file. Never invent **15.00** or **15.04**. Use the quality file only when the operator asked for no-Turbo / 20-step / 1344×768 (~45 min on this box; no SPAN). If the user says “10 seconds,” snap to **10.13 s** (243 frames) — copy a default graph and set `length` 243, or refuse. Do not invent 10.00 s. Copy, modify, or create a graph when the use case does not fit a default. Text-only / no identity images uses `workflows/h3-fl2va-default-8s.json` (or the 5.17 s smoke) unless a new FL2VA graph is required.
 
 ## Identity stills (default Ref2VA) vs FL2VA keyframes
 
@@ -91,7 +94,7 @@ The agent uploads each still with `POST /upload/image`, then `submit-prompt.py` 
 |---|---|---|
 | Repeat `--ref-image` on a Ref2VA graph (1–9 host files) | Upload, then nest `ref_images.ref_image_0`… | Identity condition. Prompt uses `<Picture 1>`…`<Picture N>` in upload order |
 | Write `<Picture N>` on an FL2VA graph | Nothing useful | Empty theater — do not do this |
-| Treat a 3-view sheet as `first_frame` | Fail-close on locked FL2VA T2V graphs | Wrong path. Use Ref2VA `--ref-image` |
+| Treat a 3-view sheet as `first_frame` | Fail-close on default FL2VA T2V graphs | Wrong path. Use Ref2VA `--ref-image` |
 | Omit `--ref-image` on Ref2VA | POST without a `ref_images` dict | Node-legal, not a proven identity generate |
 
 To make **start** require FL2VA weights instead of Ref2VA: `H3_TASK=fl2va` in `deploy/.env` or the compose environment, then recreate the container. Selecting FL2VA for a generate is passing the FL2VA JSON to `submit-prompt.sh`. Both weight sets should already be on disk (`download-weights.sh` defaults to `--task all`).
@@ -127,19 +130,20 @@ Do not start Docker, do not `docker compose restart`, and do not `kill` ComfyUI 
 
 - Download weights or put tokens in the graph
 - Enable EasyCache, SageAttention 3, a blind `--use-sage-attention` flag, Sol-Attn `flex_attention`, Turbo-SLA on top of Sol-Attn, or `--lowvram`
-- Change canvas, steps, or length except to another legal pair (5.17 / 8.00 / 10.13 / 15.08 s)
+- Invent an illegal length (10.00 / 15.00 / 15.04). Legal `17n+5` pairs include 5.17 / 8.00 / 10.13 / 15.08 s
 - Treat `<Picture N>` prompt tags as a substitute for `--ref-image` uploads, or write them on an FL2VA graph
 - Treat a 3-view sheet as `first_frame`
 - Run a separate VAE pass or another image model just to “make keyframes”
-- Strap the FL2V 8-step LoRA onto a Ref2VA graph, or invent **15.00** / **15.04** lengths
+- Strap the FL2V 8-step LoRA onto a Ref2VA graph
 - Start a second ComfyUI because the first job is “taking too long”
+- Overwrite a default `workflows/` JSON unless the operator asked to change the product default
 
 ## What is already shipped
 
 - ComfyUI image `h3-spark:local` and `deploy/compose.yaml` (`H3_TASK` defaults to `ref2va`)
-- Five locked graphs: FL2VA pair + `h3-ref2va-smoke-5s17.json` / `h3-ref2va-default-8s.json` / `h3-ref2va-long-15s08.json`
+- Reference graphs: FL2VA pair + `h3-ref2va-smoke-5s17.json` / `h3-ref2va-default-8s.json` / `h3-ref2va-long-15s08.json` plus optional `h3-ref2va-quality-15s08-20step-1344.json`. Copies and new graphs are allowed.
 - `scripts/submit-prompt.sh` (and friends), including `--ref-image`
 
-Locked Ref2VA JSON is in the tree. Live smokes exist on this Spark at `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4`. Do not commit the mp4s.
+Default Ref2VA JSON is in the tree. Live smokes exist on this Spark at `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4`. Do not commit the mp4s.
 
 Generate only if ComfyUI is already up on 8188. Do not invent a second serving path. Start commands: [`../deploy/README.md`](../deploy/README.md).

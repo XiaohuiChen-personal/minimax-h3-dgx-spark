@@ -104,9 +104,9 @@ Shifts: **6 / 3** with the Turbo LoRA. **12 / 3** without it. Shift follows dist
 
 **Status:** adopted — this is the product
 
-**What we do.** Leave ComfyUI running. SSH in. Ask Cursor or Claude. The agent fills a locked workflow and `POST`s it. A second request **waits in ComfyUI’s queue**. That is accepted.
+**What we do.** Leave ComfyUI running. SSH in. Ask Cursor or Claude. The agent `POST`s an API-format graph (a default from `workflows/`, or a copy / modified / new graph for the use case). A second request **waits in ComfyUI’s queue**. That is accepted.
 
-**Rejected.** A new ComfyUI process per video. A new graph per video. vLLM-Omni or a public website as the first product.
+**Rejected.** A new ComfyUI process per video. vLLM-Omni or a public website as the first product. Overwriting a default `workflows/` JSON without the operator asking to change the product default.
 
 Full story: [`operator.md`](operator.md).
 
@@ -144,7 +144,7 @@ Exact host tree: see [`container.md`](container.md).
 
 **Status:** adopted for implementation
 
-**What we do.** The first image and the locked workflows include:
+**What we do.** The first image and the default workflows include:
 
 - D-02 files and launch flags
 - Turbo 8-step LoRA, 8 steps
@@ -200,15 +200,16 @@ One GPU. `deploy/compose.yaml` is the documented start path. A raw `docker run` 
 
 Sampler for Ref2VA: Euler + simple, **4 steps** (5 sigma points including the final zero), shifts **6 / 3**, canvas **960×544**, SPAN 2×, Sage / Sol-Attn `triton_ref` / FBC `H3 Safe` unchanged.
 
-Locked Ref2VA lengths (all three graphs share the sampler / canvas / kernels above):
+Default Ref2VA lengths (the three reference graphs share the sampler / canvas / kernels above; a generate may copy and change them):
 
 | Role | File | Seconds | Frames (`17n+5`) | `filename_prefix` |
 |---|---|---|---|---|
 | Fast smoke | `workflows/h3-ref2va-smoke-5s17.json` | 5.17 | 124 | `h3-ref2va-smoke` |
 | Default generate | `workflows/h3-ref2va-default-8s.json` | 8.00 | 192 | `h3-ref2va` |
 | Long (optional) | `workflows/h3-ref2va-long-15s08.json` | **15.08** | **362** | `h3-ref2va-15s08` |
+| Quality (optional) | `workflows/h3-ref2va-quality-15s08-20step-1344.json` | **15.08** | **362** | `h3-ref2va-quality-15s08` |
 
-Snap “15 s” / “15.04 s” to **15.08 s / 362**. Never invent **15.00** or **15.04**. D-07 still rejects 15.08 s as the everyday default — keep the 8.00 s file as generate default.
+Snap “15 s” / “15.04 s” to **15.08 s / 362** on the Turbo long file. Never invent **15.00** or **15.04**. D-07 still rejects 15.08 s as the everyday default — keep the 8.00 s file as generate default. The quality file is 20-step / 1344×768 / no Turbo / no SPAN; use it only when asked.
 
 **Why 4 steps.** Official Ref2V Turbo LoRA is 4-step. There is no Comfy-Org 8-step Ref2V LoRA. Do not strap the FL2V 8-step LoRA onto Ref2VA. D-06’s “8 steps for speech” stays on the FL2VA graphs.
 
@@ -216,11 +217,11 @@ Snap “15 s” / “15.04 s” to **15.08 s / 362**. Never invent **15.00** or 
 
 **User selects ~15 s Ref2VA** by passing `workflows/h3-ref2va-long-15s08.json`. Snap “15 s” / “15.04 s” to this file. Do not make it the default generate.
 
-**Reference images (variable 1–9).** All three locked Ref2VA graphs ship nine `LoadImage` titles `ref_image_0`…`ref_image_8`. `--ref-image` is optional and repeatable: host files, uploaded via `POST /upload/image`. Submit wires only the first N nested `ref_images` keys. Leftover `LoadImage` nodes stay unlinked `example.png` and are **not** in the SaveVideo DAG. **10+ fail-close** (node autogrow max 9; submit `MAX_REF_IMAGES = 9`). Do not say “six only.” Do not claim unbounded N. Identity tasks should pass ≥1 `--ref-image`. Zero identity stills → submit an FL2VA graph, not 0-ref Ref2VA. `<Picture N>` is 1-based and matches `--ref-image` order. 3-view sheets are Ref2VA identity, **not** `first_frame`. Task 8/9 smokes used six bird stills (N=6 of 9 slots). Live proofs on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` (5.17 s / 124) and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4` (15.08 s / 362). Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`.
+**Reference images (variable 1–9).** All three default Ref2VA graphs ship nine `LoadImage` titles `ref_image_0`…`ref_image_8`. `--ref-image` is optional and repeatable: host files, uploaded via `POST /upload/image`. Submit wires only the first N nested `ref_images` keys. Leftover `LoadImage` nodes stay unlinked `example.png` and are **not** in the SaveVideo DAG. **10+ fail-close** (node autogrow max 9; submit `MAX_REF_IMAGES = 9`). Do not say “six only.” Do not claim unbounded N. Identity tasks should pass ≥1 `--ref-image`. Zero identity stills → submit an FL2VA graph, not 0-ref Ref2VA. `<Picture N>` is 1-based and matches `--ref-image` order. 3-view sheets are Ref2VA identity, **not** `first_frame`. Task 8/9 smokes used six bird stills (N=6 of 9 slots). Live proofs on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` (5.17 s / 124) and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4` (15.08 s / 362). Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`.
 
 **Rejected.** Using `first_frame` for 3-view sheets. Preloading a UNET in the entrypoint. Requiring a license env flag. Shipping the stock R2V template unchanged. Inventing **15.00** or **15.04** graphs. A composite 3-view contact sheet as the primary smoke. Two GPU jobs (one per bird) for the same wiring proof. 15.08 s as the D-07 default. Strapping the FL2V 8-step LoRA onto Ref2VA.
 
-**Reverses if** a same-seed live test on this box shows the 4-step Ref2V LoRA unusable for the operator’s identity jobs. Then keep the locked graphs; do not invent an 8-step Ref2V LoRA by strapping FL2V.
+**Reverses if** a same-seed live test on this box shows the 4-step Ref2V LoRA unusable for the operator’s identity jobs. Then keep the default graphs as the product reference; do not invent an 8-step Ref2V LoRA by strapping FL2V. A no-Turbo / more-steps copy is allowed when the operator asked for that path.
 
 ## Still unverified (do not block the first implementation)
 

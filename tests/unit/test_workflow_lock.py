@@ -217,3 +217,67 @@ def test_fl2va_graphs_still_forbid_ref2va():
         assert "MiniMaxH3ReferenceToVideo" not in raw
         assert "ref2va" not in raw
         assert "<Picture " not in raw
+
+
+def test_ref2va_quality_15s08_no_turbo():
+    name = "h3-ref2va-quality-15s08-20step-1344.json"
+    raw = (ROOT / "workflows" / name).read_text()
+    g = load(name)
+    assert 1344 in int_inputs(g, "width")
+    assert 768 in int_inputs(g, "height")
+    assert 362 in int_inputs(g, "length")
+    assert 20 in int_inputs(g, "steps")
+    assert 4 not in int_inputs(g, "steps")
+    assert 960 not in int_inputs(g, "width")
+    assert 544 not in int_inputs(g, "height")
+    assert "MiniMaxH3ReferenceToVideo" in raw
+    assert "minimax_h3_ref2va_pruned_fp8_scaled" in raw
+    assert "qwen3vl_32b_minimax_h3_int8_convrot" in raw
+    assert "triton_ref" in raw
+    assert "res_multistep" in raw
+    assert "LoraLoaderModelOnly" not in raw
+    assert "minimax_h3_ref2v_turbo" not in raw
+    assert "minimax_h3_fl2v_turbo" not in raw
+    assert "EasyCache" not in raw
+    assert "FirstBlockCache" not in raw
+    assert "H3 Safe" not in raw
+    assert "2x-spanx2-ch48" not in raw
+    assert "1920" not in raw
+    assert "MiniMaxH3ImageToVideo" not in raw
+    titles = [
+        (node.get("_meta") or {}).get("title")
+        for node in prompt_graph(g).values()
+        if node.get("class_type") == "LoadImage"
+    ]
+    assert titles == [f"ref_image_{i}" for i in range(9)]
+    prefixes = [
+        (node.get("inputs") or {}).get("filename_prefix")
+        for node in prompt_graph(g).values()
+        if "filename_prefix" in (node.get("inputs") or {})
+    ]
+    assert prefixes == ["h3-ref2va-quality-15s08"]
+    ref2va_nodes = [
+        node
+        for node in prompt_graph(g).values()
+        if node.get("class_type") == "MiniMaxH3ReferenceToVideo"
+    ]
+    assert len(ref2va_nodes) == 1
+    ref_inputs = ref2va_nodes[0].get("inputs") or {}
+    assert "ref_images" not in ref_inputs
+    assert ref_inputs.get("ref_image_size") == "max"
+    assert ref_inputs.get("width") == 1344
+    assert ref_inputs.get("height") == 768
+    assert ref_inputs.get("length") == 362
+    load_ids = set()
+    for nid, node in prompt_graph(g).items():
+        if node.get("class_type") != "LoadImage":
+            continue
+        load_ids.add(str(nid))
+        assert (node.get("inputs") or {}).get("image") == "example.png"
+    assert load_ids
+    for nid, node in prompt_graph(g).items():
+        for val in (node.get("inputs") or {}).values():
+            assert not links_to_load_image(val, load_ids), (name, nid)
+    for key in ref_inputs:
+        assert key == "ref_image_size" or not str(key).startswith("ref_image_"), key
+        assert not str(key).startswith("ref_images"), key

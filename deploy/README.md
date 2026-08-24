@@ -55,7 +55,7 @@ Leave ComfyUI up. Do not restart it for every video.
   --ref-image "$HOME/h3-data/blue-front.jpg"
 ```
 
-Text-only / no identity images: `workflows/h3-fl2va-default-8s.json`. ~15 s: `workflows/h3-ref2va-long-15s08.json` (**15.08 s / 362**; never 15.00 / 15.04). Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4`. Do not commit the mp4s.
+Text-only / no identity images: `workflows/h3-fl2va-default-8s.json`. ~15 s: `workflows/h3-ref2va-long-15s08.json` (**15.08 s / 362**; never 15.00 / 15.04). Quality / no-Turbo 15 s: `workflows/h3-ref2va-quality-15s08-20step-1344.json`. Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4`. Do not commit the mp4s.
 
 SaveVideo writes a suffixed host path under `$HOME/h3-output` (for example `default-8s_00001_.mp4`), not `/opt/ComfyUI/output/…`. Do not set `H3_LICENSE_ACK`.
 

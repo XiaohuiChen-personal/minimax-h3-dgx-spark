@@ -11,7 +11,7 @@ One **linux/arm64** image that:
 1. Starts ComfyUI on port **8188**
 2. Already has the H3 nodes, SPAN, Sage 2.2, Sol-Attn `triton_ref`, and FirstBlockCache `H3 Safe`
 3. Loads weights from a **host folder** (D-10)
-4. Serves the five locked workflows (FL2VA pair + Ref2VA 5.17 / 8.00 / 15.08)
+4. Serves the reference workflows (FL2VA pair + Ref2VA 5.17 / 8.00 / 15.08 Turbo, plus optional quality 15.08); agents may POST a copy or a new graph
 5. Accepts one GPU job at a time (ComfyUI’s own queue)
 6. Start-checks **shared + Ref2VA** (`H3_TASK=ref2va` default). FL2VA files may be on disk so that graph stays selectable; they are not required to start unless `H3_TASK=fl2va`
 
@@ -86,7 +86,7 @@ Implemented in `deploy/Dockerfile`. Do not put the file in `docs/`.
 6. Install custom nodes:
    - Sol-Attn (ComfyUI node pack that can select kernel `triton_ref`)
    - H3 FirstBlockCache (preset `H3 Safe`)
-   - Only other nodes the locked workflows actually call (for example a video-combine node if stock save-video is not enough)
+   - Other nodes the default or a use-case graph actually call (for example a video-combine node if stock save-video is not enough)
 7. Copy `workflows/*.json` and `scripts/*` into the image.
 8. `EXPOSE 8188`.
 9. `ENTRYPOINT` a small script that:
@@ -242,7 +242,7 @@ Prefer Compose so the mounts stay consistent.
 
 ## What is left
 
-The image, compose file, weight scripts (`download-weights.sh --task`, `check-weights.sh --task`), five locked workflows, `submit-prompt.sh` (`--ref-image`), `smoke-test.sh`, and `deploy/README.md` are already in the tree. Do not rewrite them from a pre-implementation sketch.
+The image, compose file, weight scripts (`download-weights.sh --task`, `check-weights.sh --task`), reference workflows, `submit-prompt.sh` (`--ref-image`), `smoke-test.sh`, and `deploy/README.md` are already in the tree. Do not rewrite the product defaults from a pre-implementation sketch. New use-case graphs are allowed.
 
 Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` (5.17 s / 124) and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4` (15.08 s / 362). Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`. Do not invent a different model, canvas, or serving stack.
 

@@ -10,7 +10,7 @@ This page is the mental model. Numbers and file names are in [`decisions.md`](de
 
 ## The one-sentence product
 
-A long-lived ComfyUI server on a DGX Spark holds the models in memory. An agent sends a locked recipe plus a prompt. Minutes later, an mp4 appears in the output folder. One job runs at a time.
+A long-lived ComfyUI server on a DGX Spark holds the models in memory. An agent sends an API-format graph plus a prompt (default recipe, or a modified / new graph for the use case). Minutes later, an mp4 appears in the output folder. One job runs at a time.
 
 ```text
 you (SSH) → agent → POST /prompt → ComfyUI (already running)
@@ -94,8 +94,9 @@ Locked Ref2VA lengths (D-15):
 | Fast smoke | `workflows/h3-ref2va-smoke-5s17.json` | 5.17 | 124 | `h3-ref2va-smoke` |
 | Default generate | `workflows/h3-ref2va-default-8s.json` | 8.00 | 192 | `h3-ref2va` |
 | Long (optional) | `workflows/h3-ref2va-long-15s08.json` | **15.08** | **362** | `h3-ref2va-15s08` |
+| Quality (optional) | `workflows/h3-ref2va-quality-15s08-20step-1344.json` | **15.08** | **362** | `h3-ref2va-quality-15s08` |
 
-Snap “15 s” / “15.04 s” to **15.08 s / 362**. Never invent **15.00** or **15.04**. 15.08 is not the everyday default.
+Snap “15 s” / “15.04 s” to **15.08 s / 362** on the Turbo long file. Never invent **15.00** or **15.04**. 15.08 is not the everyday default. The quality file is optional (20-step / 1344×768 / no Turbo).
 
 Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` (5.17 s / 124) and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4` (15.08 s / 362). Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`.
 
@@ -137,7 +138,7 @@ Not one magic binary. A **pipeline**:
 4. Ref2V 4-step Turbo LoRA on Ref2VA; FL2V 8-step Turbo LoRA on FL2VA
 5. SPAN (enlarge)
 6. Sampler that knows two clocks (`ModelSamplingAV`)
-7. Five locked workflow JSON files (FL2VA pair + Ref2VA 5.17 / 8.00 / 15.08)
+7. Five default workflow JSON files (FL2VA pair + Ref2VA 5.17 / 8.00 / 15.08); copies and new graphs are allowed
 8. A submit/poll helper (`--ref-image` uploads identity stills)
 
 ComfyUI is the assembly surface because those pieces are already nodes. The Docker image is that assembly, frozen, plus GPU torch that actually sees the GB10.

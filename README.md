@@ -2,7 +2,7 @@
 
 A DGX Spark (GB10) project for running [MiniMax H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) — a 33B joint video-and-audio model — through **ComfyUI**, then packaging that stack so other Spark users can run the same recipe.
 
-**Product:** SSH into a Spark, ask Cursor or Claude to run a locked workflow, get an mp4. One GPU job at a time. The Docker image exists so the next Spark gets the same server.
+**Product:** SSH into a Spark, ask Cursor or Claude to generate, get an mp4. Default graphs in `workflows/` are the starting point; agents may copy, modify, or create a new API-format graph for the use case. One GPU job at a time. The Docker image exists so the next Spark gets the same server.
 
 This repository does **not** host model weights.
 
@@ -14,7 +14,7 @@ This repository does **not** host model weights.
 |---|---|---|
 | Research | Understand H3, measure this GB10, pick an operating point | Published |
 | Design | End-to-end contract an agent can implement | Filled in |
-| Implement | Workflows, scripts, Dockerfile | Shipped (`h3-spark:local`, locked graphs) |
+| Implement | Workflows, scripts, Dockerfile | Shipped (`h3-spark:local`, default graphs) |
 
 **Locked operating point:** generate at `960×544` for **8.00 s** (192 frames), then 2× SPAN to `1920×1088` and crop to 1080p. **Default generate is Ref2VA** (4 steps, D-15). First smoke: **5.17 s**. Optional long: **15.08 s / 362** (never 15.00 / 15.04). Text-only / no identity images uses the FL2VA pair (8 steps).
 
@@ -26,7 +26,7 @@ If you want the **measurements**, read the [research briefing](https://xiaohuich
 
 ## Who this is for
 
-- This machine, now that the image and locked graphs exist.
+- This machine, now that the image and default graphs exist.
 - Other DGX Spark users who want the same path without re-deriving quantization, canvas, step count, and ARM64 traps.
 
 ## Deploy on a DGX Spark
@@ -69,7 +69,7 @@ First `compose build` compiles SageAttention 2.2 and torchaudio from source. The
 docs/         GitHub Pages: hub, briefing, design pages.
 design/       Source of truth (markdown).
 deploy/       Dockerfile, compose.yaml, start pins.
-workflows/    Five locked ComfyUI graphs (FL2VA pair + Ref2VA 5.17 / 8.00 / 15.08).
+workflows/    Reference ComfyUI graphs (FL2VA pair + Ref2VA 5.17 / 8.00 / 15.08 Turbo, plus optional quality 15.08). Copies and new graphs are allowed.
 scripts/      Download, check-weights, submit/poll, smoke-test, entrypoint.
 ```
 
@@ -85,14 +85,15 @@ design/*.md  ──already locked──►  docs/design/*.html
         └──already shipped──►  workflows/ + scripts/ + deploy/
 ```
 
-1. Do **not** invent a different model, canvas, or serving stack.
-2. Use the five locked graphs and the scripts in [`scripts/README.md`](scripts/README.md). Default generate is `workflows/h3-ref2va-default-8s.json`. ~15 s uses `workflows/h3-ref2va-long-15s08.json` (**15.08 s / 362**). Text-only / no identity images uses the FL2VA pair. Do not add a sixth graph.
+1. Do **not** invent a different serving stack. ComfyUI on 8188 stays the generate server. Default graphs are a reference — copy, modify, or add a graph when the use case needs it.
+2. Start from the graphs in [`workflows/README.md`](workflows/README.md) and the scripts in [`scripts/README.md`](scripts/README.md). Default generate is `workflows/h3-ref2va-default-8s.json`. ~15 s uses `workflows/h3-ref2va-long-15s08.json` (**15.08 s / 362**). Quality / no-Turbo 15 s uses `workflows/h3-ref2va-quality-15s08-20step-1344.json`. Text-only / no identity images uses the FL2VA pair. Another graph is allowed.
 
 | User ask | File | Length |
 |---|---|---|
 | Default / “about 8 seconds” | `workflows/h3-ref2va-default-8s.json` | **8.00 s / 192** |
 | Fast smoke / “about 5 seconds” | `workflows/h3-ref2va-smoke-5s17.json` | **5.17 s / 124** |
 | “15 seconds” / “15.04 s” / “about 15 seconds” | `workflows/h3-ref2va-long-15s08.json` | **15.08 s / 362** |
+| Quality / no Turbo / 20-step 15 s | `workflows/h3-ref2va-quality-15s08-20step-1344.json` | **15.08 s / 362** |
 | Text-only / no identity images, about 8 seconds | `workflows/h3-fl2va-default-8s.json` | **8.00 s / 192** |
 | Text-only fast smoke | `workflows/h3-fl2va-smoke-5s17.json` | **5.17 s / 124** |
 
