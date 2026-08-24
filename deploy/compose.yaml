@@ -1,0 +1,30 @@
+# Nested ${H3_WEIGHTS:-${HOME}/h3-weights} needs Compose v2 and HOME in the environment.
+# If a mount is empty, write deploy/.env with absolute H3_WEIGHTS / H3_OUTPUT / H3_DATA.
+# build.context is the repo root so the image can COPY workflows/ and scripts/.
+# `build: .` would use this directory as context and those COPY steps would fail.
+services:
+  comfyui:
+    image: h3-spark:local
+    platform: linux/arm64
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      args:
+        BASE_IMAGE: nvcr.io/nvidia/pytorch:25.12-py3
+        COMFYUI_SHA: b78cec879b9460d5cb25228a83a942fb78d2cd24
+        KJNODES_SHA: 3f20054214fec9f9234fd3841ae6f1e4287948f6
+        SOL_ATTN_SHA: 930a4d6e432ff8b8ed5e30ff2f72519b92d69bdf
+        FBC_SHA: 725973c3bfd9de6dce249bc93dc5fe27f820df31
+        SAGEATTENTION_SHA: eb615cf6cf4d221338033340ee2de1c37fbdba4a
+    gpus: all
+    ports:
+      - "8188:8188"
+    volumes:
+      - ${H3_WEIGHTS:-${HOME}/h3-weights}/diffusion_models:/opt/ComfyUI/models/diffusion_models:ro
+      - ${H3_WEIGHTS:-${HOME}/h3-weights}/text_encoders:/opt/ComfyUI/models/text_encoders:ro
+      - ${H3_WEIGHTS:-${HOME}/h3-weights}/vae:/opt/ComfyUI/models/vae:ro
+      - ${H3_WEIGHTS:-${HOME}/h3-weights}/loras:/opt/ComfyUI/models/loras:ro
+      - ${H3_WEIGHTS:-${HOME}/h3-weights}/upscale_models:/opt/ComfyUI/models/upscale_models:ro
+      - ${H3_OUTPUT:-${HOME}/h3-output}:/opt/ComfyUI/output
+      - ${H3_DATA:-${HOME}/h3-data}:/data:ro
+    restart: unless-stopped
