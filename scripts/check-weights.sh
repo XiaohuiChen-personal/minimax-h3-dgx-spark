@@ -12,7 +12,8 @@ TASK="${H3_TASK:-ref2va}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --task)
-      TASK="${2:-}"; shift 2 ;;
+      [[ -n "${2:-}" ]] || usage
+      TASK="$2"; shift 2 ;;
     -h|--help)
       usage ;;
     *)
