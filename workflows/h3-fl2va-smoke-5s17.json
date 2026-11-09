@@ -55,14 +55,15 @@
   "6": {
     "class_type": "MiniMaxH3SigmaShift",
     "_meta": {
-      "title": "ModelSamplingAV"
+      "title": "ModelSamplingAV 12/3",
+      "note": "Comfy-Org 544p Turbo LoRAs (FL2V 8-step v1.0, Ref2V 4-step v0.1) were distilled at shift 12/3 (ModelTC/Minimax-H3-Turbo spec table; LightX2V minimax_h3_ref2av_4step.json; ComfyUI MiniMaxH3 default). 6/3 is for the 768p LoRAs only."
     },
     "inputs": {
       "model": [
         "5",
         0
       ],
-      "shift_video": 6.0,
+      "shift_video": 12.0,
       "shift_audio": 3.0
     }
   },
@@ -87,7 +88,8 @@
     "_meta": {
       "title": "Sol-Attn kernel triton_ref",
       "pack": "Saganaki22/ComfyUI-sol-attn",
-      "note": "triton-ref pack (class has no kernel combo). Task 9 must clone Saganaki22/ComfyUI-sol-attn, not the KingGore fork."
+      "note": "triton-ref pack (class has no kernel combo). Task 9 must clone Saganaki22/ComfyUI-sol-attn, not the KingGore fork.",
+      "dense_blocks_note": "Keep blocks 0-2 and the last block dense (Sage 2.2 fallback). Sol-Attn README: 'First and last blocks are the most approximation-sensitive'; LightX2V's H3 Sol config keeps layer 0 dense."
     },
     "inputs": {
       "model": [
@@ -102,7 +104,7 @@
       "int8_qk": false,
       "int8_pv": false,
       "sink_conditioning": "exact_kv",
-      "dense_blocks": ""
+      "dense_blocks": "0-2,-1"
     }
   },
   "9": {

@@ -87,13 +87,14 @@ Implemented in `deploy/Dockerfile`. Do not put the file in `docs/`.
    - Sol-Attn (ComfyUI node pack that can select kernel `triton_ref`)
    - H3 FirstBlockCache (preset `H3 Safe`)
    - Other nodes the default or a use-case graph actually call (for example a video-combine node if stock save-video is not enough)
-7. Copy `workflows/*.json` and `scripts/*` into the image.
-8. `EXPOSE 8188`.
-9. `ENTRYPOINT` a small script that:
+7. Apply the backported ComfyUI patches in `deploy/patches/` in a late layer and run their CPU tests (build fails if a patch does not apply or its test fails). Today: the H3 VAE tile-blend fix (upstream `fc584aaa`).
+8. Copy `workflows/*.json` and `scripts/*` into the image.
+9. `EXPOSE 8188`.
+10. `ENTRYPOINT` a small script that:
    - runs the weight-file check (D-10)
    - starts ComfyUI with the launch flags below
    - does **not** require a license env flag (D-13)
-10. Labels: `comfyui.git_sha`, `base.image`, `h3.decision_set` (D-01…D-15; the image label is updated when the image is rebuilt).
+11. Labels: `comfyui.git_sha`, `comfyui.patches`, `base.image`, `h3.decision_set` (D-01…D-15; the image label is updated when the image is rebuilt).
 
 ### Launch flags (required)
 

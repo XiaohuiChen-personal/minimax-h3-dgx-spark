@@ -9,6 +9,7 @@ Read in this order:
 3. [`optimizations.md`](optimizations.md) — what to speed up, and what never to turn on
 4. [`operator.md`](operator.md) — how a person and an agent use the running server
 5. [`container.md`](container.md) — how to build and start the Docker image
+6. [`prompting.md`](prompting.md) — the structured prompt the agent must write for every generate
 
 Public HTML (same content, for humans):
 
@@ -22,7 +23,7 @@ Evidence behind the numbers lives in the [research briefing](https://xiaohuichen
 
 ## What is already decided
 
-The product is: SSH into a DGX Spark, ask Cursor or Claude to generate, get an mp4. One GPU job at a time. ComfyUI stays up. The graph is predefined. **Default generate is Ref2VA 8.00 s** (D-15). FL2VA stays the text-only / no-identity path.
+The product is: ask Cursor or Claude to generate — on the Spark over SSH, or from a laptop on the same Tailscale tailnet — and get an mp4. The agent writes H3's structured prompt ([`prompting.md`](prompting.md)). One GPU job at a time. ComfyUI stays up. The graph is predefined. **Default generate is Ref2VA 8.00 s** (D-15). FL2VA stays the text-only / no-identity path.
 
 Executed FL2VA implement path:
 

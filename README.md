@@ -2,7 +2,7 @@
 
 A DGX Spark (GB10) project for running [MiniMax H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) — a 33B joint video-and-audio model — through **ComfyUI**, then packaging that stack so other Spark users can run the same recipe.
 
-**Product:** SSH into a Spark, ask Cursor or Claude to generate, get an mp4. Default graphs in `workflows/` are the starting point; agents may copy, modify, or create a new API-format graph for the use case. One GPU job at a time. The Docker image exists so the next Spark gets the same server.
+**Product:** ask Cursor or Claude to generate — in an SSH session on the Spark, or from a laptop on the same Tailscale tailnet — and get an mp4. The agent writes H3's structured prompt ([`design/prompting.md`](design/prompting.md)) and submits it to the Spark's ComfyUI. Default graphs in `workflows/` are the starting point; agents may copy, modify, or create a new API-format graph for the use case. One GPU job at a time. The Docker image exists so the next Spark gets the same server.
 
 This repository does **not** host model weights.
 
@@ -52,14 +52,17 @@ curl -fsS http://127.0.0.1:8188/system_stats
 
 # Default generate: Ref2VA 8.00 s / 192 frames. Leave ComfyUI up; do not restart per video.
 # Repeat --ref-image 1–9 times. Identity stills are not first_frame.
+# The prompt is H3's structured six-section format (design/prompting.md), saved to a file.
 ./scripts/submit-prompt.sh workflows/h3-ref2va-default-8s.json \
-  --prompt "<Picture 1> is the front of the subject. A quiet scene. Stereo room tone. No speech." \
+  --prompt-file "$HOME/h3-data/prompts/default-8s.txt" \
   --seed 42 \
   --name default-8s \
   --ref-image "$HOME/h3-data/blue-front.jpg"
 ```
 
-SaveVideo writes `$HOME/h3-output/<name>_00001_.mp4`. Do not set `H3_LICENSE_ACK`. If a bind mount is empty, put absolute `H3_WEIGHTS` / `H3_OUTPUT` / `H3_DATA` in `deploy/.env` (paths only; no tokens).
+SaveVideo writes `$HOME/h3-output/<name>_00001_.mp4`. Do not set `H3_LICENSE_ACK`.
+
+**From a laptop on the same tailnet** (no GPU, no Docker there): `export H3_COMFY_URL=http://<spark-tailscale-name>:8188`, then run the same `./scripts/submit-prompt.sh …` from the laptop's clone with laptop paths. It uploads the stills over HTTP, waits, downloads the mp4 into the laptop's `~/h3-output`, and prints `REMOTE_OUTPUT` and `OUTPUT`. If a bind mount is empty, put absolute `H3_WEIGHTS` / `H3_OUTPUT` / `H3_DATA` in `deploy/.env` (paths only; no tokens).
 
 First `compose build` compiles SageAttention 2.2 and torchaudio from source. The image should be about **20 GiB**. If it is ~50 GiB, weights were copied into a layer — that is a bug. The NGC base is `nvcr.io/nvidia/pytorch:25.12-py3`; sign in to NGC if the pull is denied.
 
@@ -69,7 +72,7 @@ First `compose build` compiles SageAttention 2.2 and torchaudio from source. The
 docs/         GitHub Pages: hub, briefing, design pages.
 design/       Source of truth (markdown).
 deploy/       Dockerfile, compose.yaml, start pins.
-workflows/    Reference ComfyUI graphs (FL2VA pair + Ref2VA 5.17 / 8.00 / 15.08 Turbo, plus optional quality 15.08). Copies and new graphs are allowed.
+workflows/    Reference ComfyUI graphs (FL2VA pair + FL2VA keyframes + Ref2VA 5.17 / 8.00 / 15.08 Turbo, plus optional quality 15.08). Copies and new graphs are allowed.
 scripts/      Download, check-weights, submit/poll, smoke-test, entrypoint.
 ```
 
@@ -96,6 +99,7 @@ design/*.md  ──already locked──►  docs/design/*.html
 | Quality / no Turbo / 20-step 15 s | `workflows/h3-ref2va-quality-15s08-20step-1344.json` | **15.08 s / 362** |
 | Text-only / no identity images, about 8 seconds | `workflows/h3-fl2va-default-8s.json` | **8.00 s / 192** |
 | Text-only fast smoke | `workflows/h3-fl2va-smoke-5s17.json` | **5.17 s / 124** |
+| Start from / end on a still (I2VA / FL2VA / L2VA) | `workflows/h3-fl2va-keyframes-8s.json` | **8.00 s / 192** |
 
 3. Build and start from [`deploy/README.md`](deploy/README.md): `docker compose -f deploy/compose.yaml up -d` from the **repository root**. Do not `cd deploy` and run a bare `docker compose up`.
 4. On the Spark: download weights into `~/h3-weights` **subfolders** (`download-weights.sh --task all`), then start once (`H3_TASK=ref2va`). Leave ComfyUI up.
@@ -114,7 +118,7 @@ Full cards: [`design/decisions.md`](design/decisions.md).
 | D-03 | Native 1312×736 | Superseded by D-05 |
 | D-04 | SPAN for 2× upscale | Adopted |
 | D-05 | Generate 960×544, then 2× to 1080p | Adopted for implementation |
-| D-06 | 8 steps for dialogue | Adopted for implementation |
+| D-06 | 8 steps for dialogue; shifts 12 / 3 for the shipped 544p Turbo LoRAs (corrected 2026-11-09) | Adopted for implementation |
 | D-07 | Default 8.00 s; smoke 5.17 s | Adopted |
 | D-08 | SSH + agent, one GPU job at a time | Adopted |
 | D-09 | NVIDIA GPU PyTorch CUDA 13 ARM64 base | Adopted |

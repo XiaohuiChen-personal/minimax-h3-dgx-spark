@@ -281,3 +281,82 @@ def test_ref2va_quality_15s08_no_turbo():
     for key in ref_inputs:
         assert key == "ref_image_size" or not str(key).startswith("ref_image_"), key
         assert not str(key).startswith("ref_images"), key
+
+
+def test_fl2va_keyframes_graph_ships_unlinked_titled_loadimages():
+    """Keyframes are IMAGE sockets: submit links first_frame / last_frame LoadImages on demand."""
+    name = "h3-fl2va-keyframes-8s.json"
+    raw = (ROOT / "workflows" / name).read_text()
+    g = prompt_graph(load(name))
+    template = prompt_graph(load("h3-fl2va-default-8s.json"))
+    for nid, node in template.items():
+        if nid in ("10", "23"):
+            continue
+        assert g[nid] == node, nid
+    assert 192 in int_inputs(g, "length")
+    assert 8 in int_inputs(g, "steps")
+    assert 960 in int_inputs(g, "width")
+    assert 544 in int_inputs(g, "height")
+    for bad in ("MiniMaxH3ReferenceToVideo", "ref2va", "EasyCache", "flex_attention", "lowvram"):
+        assert bad not in raw, bad
+    i2v = g["10"]
+    assert i2v["class_type"] == "MiniMaxH3ImageToVideo"
+    assert "first_frame" not in i2v["inputs"]
+    assert "last_frame" not in i2v["inputs"]
+    loads = {
+        nid: node for nid, node in g.items() if node.get("class_type") == "LoadImage"
+    }
+    assert sorted((n["_meta"]["title"] for n in loads.values())) == ["first_frame", "last_frame"]
+    assert all(n["inputs"]["image"] == "example.png" for n in loads.values())
+    for nid, node in g.items():
+        for val in (node.get("inputs") or {}).values():
+            assert not links_to_load_image(val, set(loads)), nid
+    prefixes = [
+        (node.get("inputs") or {}).get("filename_prefix")
+        for node in g.values()
+        if "filename_prefix" in (node.get("inputs") or {})
+    ]
+    assert prefixes == ["h3-fl2va-keyframes"]
+
+
+TURBO_GRAPHS = (
+    "h3-fl2va-smoke-5s17.json",
+    "h3-fl2va-default-8s.json",
+    "h3-fl2va-keyframes-8s.json",
+    *REF2VA_GRAPHS,
+)
+
+
+def test_all_graphs_use_shift_12_3_for_544p_turbo_and_base():
+    """The Comfy-Org 544p Turbo LoRAs were distilled at 12/3 (ModelTC/Minimax-H3-Turbo spec).
+
+    6/3 belongs to the 768p LoRAs, which this repo does not ship.
+    """
+    for name in (*TURBO_GRAPHS, "h3-ref2va-quality-15s08-20step-1344.json"):
+        g = prompt_graph(load(name))
+        shifts = [
+            node["inputs"]
+            for node in g.values()
+            if node.get("class_type") == "MiniMaxH3SigmaShift"
+        ]
+        assert len(shifts) == 1, name
+        assert shifts[0]["shift_video"] == 12.0, name
+        assert shifts[0]["shift_audio"] == 3.0, name
+        assert "768p" not in "".join(
+            str((n.get("inputs") or {}).get("lora_name", "")) for n in g.values()
+        ), name
+
+
+def test_sol_attn_keeps_sensitive_blocks_dense():
+    """Sol-Attn README: first and last blocks are the most approximation-sensitive."""
+    for path in sorted((ROOT / "workflows").glob("*.json")):
+        g = prompt_graph(json.loads(path.read_text()))
+        sol = [
+            node["inputs"]
+            for node in g.values()
+            if node.get("class_type") == "MiniMaxH3MemoryEfficientSolAttentionPatch"
+        ]
+        assert len(sol) == 1, path.name
+        assert sol[0]["dense_blocks"] == "0-2,-1", path.name
+        assert sol[0]["tau"] == 1.3, path.name
+        assert sol[0]["sink_conditioning"] == "exact_kv", path.name

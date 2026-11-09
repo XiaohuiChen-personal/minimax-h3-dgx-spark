@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Product end goal: SSH plus an AI agent submits a locked ComfyUI workflow. One GPU job at a time.">
+<meta name="description" content="Product end goal: an AI agent on the Spark (SSH) or on a tailnet laptop submits a ComfyUI workflow with a structured H3 prompt. One GPU job at a time.">
 <title>Operator — MiniMax H3 on DGX Spark</title>
 <link rel="stylesheet" href="../assets/site.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -68,6 +68,16 @@
 </section>
 
 <section>
+  <div class="shead"><span class="snum">01b</span><h2>From a laptop, and the prompt the agent writes</h2></div>
+  <p class="sdek">Added 2026-11-09. Source of truth: <a href="https://github.com/XiaohuiChen-personal/minimax-h3-dgx-spark/blob/main/design/operator.md">operator.md</a> and <a href="https://github.com/XiaohuiChen-personal/minimax-h3-dgx-spark/blob/main/design/prompting.md">prompting.md</a>.</p>
+  <ul>
+    <li><b>Where the agent runs.</b> In an SSH session on the Spark, or on a laptop on the same Tailscale tailnet. From a laptop: <code>export H3_COMFY_URL=http://spark-2a60:8188</code>, then run <code>scripts/submit-prompt.sh</code> from the laptop's clone with laptop paths. It uploads the stills over HTTP, waits, downloads the mp4 with <code>GET /view</code>, and prints <code>REMOTE_OUTPUT</code> and <code>OUTPUT</code>. No GPU or Docker on the laptop.</li>
+    <li><b>Structured prompt.</b> H3 was trained on rewritten prompts. MiniMax calls that rewrite “critical to the quality of the final output.” The agent writes it: three fields (<code>integrated_multimodal_description</code>, <code>overall_soundscape</code>, <code>non_diegetic_music</code>) on FL2VA, six sections on Ref2VA, with speech in <code>&lt;d&gt;[English] …&lt;/d&gt;</code>. It is passed with <code>--prompt-file</code>.</li>
+    <li><b>Keyframes.</b> <code>workflows/h3-fl2va-keyframes-8s.json</code> plus <code>--first-frame</code> / <code>--last-frame</code> uploads the stills and links them into the H3 node's IMAGE inputs.</li>
+  </ul>
+</section>
+
+<section>
   <div class="shead"><span class="snum">02</span><h2>Operator steps</h2></div>
   <p class="sdek">ComfyUI is already up. The agent only fills free fields and waits.</p>
   <ol>
@@ -103,7 +113,7 @@
       <thead><tr><th>Locked in the workflow</th><th>Agent may change</th></tr></thead>
       <tbody>
         <tr><td>D-15 Ref2VA DiT + 4-step LoRA (or D-02 FL2VA)</td><td>Text prompt</td></tr>
-        <tr><td>960×544, SPAN 2×, Euler+simple, shifts 6 / 3</td><td>Seed</td></tr>
+        <tr><td>960×544, SPAN 2×, Euler+simple, shifts 12 / 3</td><td>Seed</td></tr>
         <tr><td>Ref2VA 4 steps / FL2VA 8 steps</td><td>Output filename</td></tr>
         <tr><td>Sampler, Sage 2.2, Sol-Attn triton_ref, FBC H3 Safe</td><td>Optional <code>--ref-image</code> host files (1–9)</td></tr>
       </tbody>

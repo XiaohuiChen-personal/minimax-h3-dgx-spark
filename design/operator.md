@@ -2,29 +2,31 @@
 
 **Status:** adopted (D-08)
 
-After the image is running, a person SSHs into the Spark and asks Cursor or Claude to make a clip. The agent does **not** build a new graph and does **not** start a new model process. It fills a **predefined** workflow and sends it to a **ComfyUI that is already up**.
+After the image is running, a person asks Cursor or Claude to make a clip — either in an SSH session on the Spark, or on another machine on the same Tailscale tailnet (for example a MacBook). The agent does **not** start a new model process. It rewrites the request into H3's structured prompt ([`prompting.md`](prompting.md)), fills a default workflow (or a copy made for the use case), and sends it to the **ComfyUI that is already up on the Spark**.
 
 This is local, one-user work. **One GPU job at a time is the accepted limit.**
 
 ## The product, in one picture
 
 ```text
-SSH / Cursor
-      │
-      ▼
-agent fills prompt, seed, name, optional --ref-image stills
-      │
-      ▼
-POST http://127.0.0.1:8188/prompt
+agent on the Spark (SSH)          agent on a laptop (Tailscale)
+      │                                   │
+      ▼                                   ▼
+agent writes the structured prompt, fills seed, name, optional stills
+      │                                   │
+      ▼                                   ▼
+POST http://127.0.0.1:8188/prompt   POST http://spark-2a60:8188/prompt
       │
       ▼
 ComfyUI (weights already in memory)
       │
       ▼
 ~/h3-output/<name>_00001_.mp4     (24 fps + 32 kHz stereo; SaveVideo suffix)
+      │
+      └── remote only: GET /view → laptop ~/h3-output/<name>_00001_.mp4
 ```
 
-- Port **8188**. The web UI is optional (`ssh -L 8188:127.0.0.1:8188`). Agents use the HTTP API.
+- Port **8188**. Compose publishes it on all interfaces, so tailnet peers reach `http://spark-2a60:8188`. The web UI is optional (open that URL, or `ssh -L 8188:127.0.0.1:8188 spark-2a60`). Agents use the HTTP API.
 - Locked graphs: [`../workflows/`](../workflows/). Submit helper: [`../scripts/`](../scripts/).
 - Weights stay on the host. Never in git. Never baked into the image.
 
@@ -33,10 +35,10 @@ This is not a chat model. There is no word-by-word loop.
 ## Everyday steps
 
 1. **Leave ComfyUI running.** Start it once (`docker compose -f deploy/compose.yaml up -d` from the repo root — see [`container.md`](container.md) and [`../deploy/README.md`](../deploy/README.md)). Reloading the models is the expensive part.
-2. **SSH into the Spark** and open Cursor or Claude there.
-3. **Ask for a generate.** Default is Ref2VA 8.00 s (`workflows/h3-ref2va-default-8s.json`) plus identity stills. Example: “Use the default 8 s workflow. Prompt: … Seed: 42. These stills: …”
-4. **The agent only changes free fields**, uploads `--ref-image` host files via `POST /upload/image` when identity stills were given, then `POST /prompt` (or calls `scripts/submit-prompt.sh`).
-5. **It waits by polling** `/history/<prompt_id>` for minutes, then returns the host path under `~/h3-output` (SaveVideo suffix, for example `default-8s_00001_.mp4`).
+2. **Open Cursor or Claude** in an SSH session on the Spark, **or** on a laptop on the same tailnet with `H3_COMFY_URL=http://spark-2a60:8188`.
+3. **Ask for a generate.** Default is Ref2VA 8.00 s (`workflows/h3-ref2va-default-8s.json`) plus identity stills. Example: “Use the default 8 s workflow. Two birds touch beaks on a perch. Seed: 42. These stills: …”
+4. **The agent writes the structured prompt** ([`prompting.md`](prompting.md)) to a file, uploads stills via `POST /upload/image`, then `POST /prompt` (it calls `scripts/submit-prompt.sh --prompt-file …`).
+5. **It waits by polling** `/history/<prompt_id>` for minutes, then returns the host path under `~/h3-output` (SaveVideo suffix, for example `default-8s_00001_.mp4`). From a laptop it also downloads the mp4 with `GET /view` into the laptop's `~/h3-output` and prints both paths.
 
 A second `POST /prompt` while one job is running **queues**. That is fine.
 
@@ -66,7 +68,7 @@ The JSON is a shopping list. The hard work is inside one sampler node.
 | Default-graph knobs (change on a copy when needed) | Always free |
 |---|---|
 | D-15 Ref2VA DiT + 4-step LoRA (or D-02 FL2VA when that graph is chosen) | Text prompt |
-| 960×544, SPAN 2×, Euler+simple, shifts 6 / 3 | Seed |
+| 960×544, SPAN 2×, Euler+simple, shifts 12 / 3 | Seed |
 | Ref2VA **4 steps** / FL2VA **8 steps** | Output filename |
 | Sampler, Sage 2.2, Sol-Attn `triton_ref`, FBC `H3 Safe` | Optional `--ref-image` host files (Ref2VA, variable 1–9) |
 | Length of the chosen default file | Optional first/last-frame files (only if that graph has the keys) |
@@ -107,11 +109,12 @@ ComfyUI is already running.
 
 | Step | Call | Notes |
 |---|---|---|
-| Upload stills | `POST /upload/image` per `--ref-image` | Host files only. Graph stores the uploaded name, not a host path |
+| Upload stills | `POST /upload/image` per `--ref-image` / `--first-frame` / `--last-frame` | Local files on whichever machine runs submit. Graph stores the uploaded name, not a path |
 | Submit | `POST /prompt` with the workflow JSON | Free fields already patched |
 | Remember | JSON field `prompt_id` | |
 | Wait | `GET /history/<prompt_id>` every few seconds | Jobs take **minutes**. Do not assume one chat turn is enough. |
 | Done | History shows outputs | Return the host path under `~/h3-output` |
+| Fetch (remote only) | `GET /view?filename=…&subfolder=…&type=output` | Saves into the laptop's `~/h3-output`; prints `REMOTE_OUTPUT` and `OUTPUT` |
 | Busy | Another `POST /prompt` | Must queue, not spawn a second server |
 
 Do not start Docker, do not `docker compose restart`, and do not `kill` ComfyUI as part of a normal generate.
@@ -133,6 +136,8 @@ Do not start Docker, do not `docker compose restart`, and do not `kill` ComfyUI 
 - Invent an illegal length (10.00 / 15.00 / 15.04). Legal `17n+5` pairs include 5.17 / 8.00 / 10.13 / 15.08 s
 - Treat `<Picture N>` prompt tags as a substitute for `--ref-image` uploads, or write them on an FL2VA graph
 - Treat a 3-view sheet as `first_frame`
+- Submit a one-line prompt instead of the structured format in [`prompting.md`](prompting.md)
+- Run H3, Docker, or GPU torch on the laptop when remote — the Spark does all GPU work
 - Run a separate VAE pass or another image model just to “make keyframes”
 - Strap the FL2V 8-step LoRA onto a Ref2VA graph
 - Start a second ComfyUI because the first job is “taking too long”

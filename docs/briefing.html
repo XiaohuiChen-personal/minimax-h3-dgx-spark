@@ -1386,7 +1386,11 @@
         <li><strong>Shift does not track resolution.</strong> I speculated it might need to be 6/3 at
         high res. It doesn't — <code>shift</code> tracks <em>distillation</em>. LightX2V's non-distilled
         base config at 1344×768/362 frames uses 12.0, identical to its 544p base configs, while its 544p
-        DMD 4-step config uses 6.0. Use 6/3 with the turbo LoRA at any resolution; 12/3 without one.</li>
+        DMD 4-step config uses 6.0. Use 6/3 with the turbo LoRA at any resolution; 12/3 without one.
+        <strong>Corrected 2026-11-09:</strong> wrong for the LoRAs this repo ships. The
+        <a href="https://github.com/ModelTC/Minimax-H3-Turbo">ModelTC spec table</a> lists FL2VA Turbo 8-step v1.0 and
+        Ref2VA Turbo 4-step v0.1 (544p) as distilled at <strong>12/3</strong>; only the 768p FL2V LoRAs are 6/3, and
+        LightX2V's current 6.0 configs are those 768p files. Shift follows the LoRA's training schedule. The graphs now use 12/3.</li>
         <li><strong>The 768p turbo adapter is not the high-res answer.</strong> A discussion thread
         titled “768p way worse than 544p” reports the 768p v1.0 giving oversaturation, bad audio and poor
         prompt adherence; several users find the 544p-trained v0.1 better even above 1 MP. A

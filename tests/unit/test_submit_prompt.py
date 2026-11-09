@@ -36,6 +36,9 @@ SUCCESS_HISTORY = {
 }
 
 
+VIEW_BODY = b"\x00\x00\x00\x18ftypmp42-fake-h3-video"
+
+
 def _multipart_filename(body: bytes) -> str:
     text = body.decode("latin-1")
     quoted = re.search(r'filename="([^"]+)"', text)
@@ -65,6 +68,8 @@ class MockComfyServer(HTTPServer):
         self.history_gets = 0
         self.history_error = False
         self.history_payload = SUCCESS_HISTORY
+        self.view_queries: list[str] = []
+        self.view_body = VIEW_BODY
 
 
 class MockComfyHandler(BaseHTTPRequestHandler):
@@ -105,6 +110,15 @@ class MockComfyHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0].rstrip("/") or "/"
+        if path == "/view":
+            self.server.view_queries.append(self.path.split("?", 1)[1] if "?" in self.path else "")
+            body = self.server.view_body
+            self.send_response(200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if path == "/history/abc":
             self.server.history_gets += 1
             if getattr(self.server, "history_error", False):
@@ -184,6 +198,9 @@ def test_submit_prompt_prints_host_output_from_history(tmp_path, mock_comfy):
     assert stdout == f"OUTPUT {expected}"
     assert stdout.endswith("history-name.mp4")
     assert expected in result.stdout
+    # Not already under --output-root, so it was fetched with GET /view.
+    assert Path(expected).read_bytes() == VIEW_BODY
+    assert mock_comfy.view_queries == ["filename=history-name.mp4&subfolder=clips&type=output"]
 
     assert mock_comfy.posted, "expected POST /prompt"
     body = mock_comfy.posted[0]
@@ -210,37 +227,192 @@ def test_does_not_change_locked_canvas(tmp_path, mock_comfy):
     assert all(steps == 8 for steps in _input_values(graph, "steps"))
 
 
-def test_rewrites_keyframe_host_paths_to_data(tmp_path, mock_comfy):
-    data_root = tmp_path / "h3-data"
-    (data_root / "shots").mkdir(parents=True)
-    first = data_root / "first.png"
-    last = data_root / "shots" / "last.png"
+def _keyframe_workflow(tmp_path: Path) -> Path:
+    data = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    data["24"] = {"class_type": "LoadImage", "_meta": {"title": "first_frame"}, "inputs": {"image": "example.png"}}
+    data["25"] = {"class_type": "LoadImage", "_meta": {"title": "last_frame"}, "inputs": {"image": "example.png"}}
+    workflow = tmp_path / "keyframes.json"
+    workflow.write_text(json.dumps(data), encoding="utf-8")
+    return workflow
+
+
+def _run(cmd_tail: list[str], workflow: Path, tmp_path: Path, port: int, env=None):
+    output_root = tmp_path / "out"
+    output_root.mkdir(exist_ok=True)
+    cmd = [
+        sys.executable, str(SCRIPT), str(workflow),
+        "--seed", "7", "--name", "unit",
+        "--base-url", f"http://127.0.0.1:{port}",
+        "--output-root", str(output_root),
+        *cmd_tail,
+    ]
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, check=False,
+        env=env if env is not None else os.environ.copy(),
+    )
+    return result, output_root
+
+
+def test_keyframes_upload_and_link_into_i2v(tmp_path, mock_comfy):
+    """first_frame / last_frame are IMAGE sockets: upload, then link the titled LoadImage."""
+    first = tmp_path / "first.png"
+    last = tmp_path / "last.png"
     first.write_bytes(b"x")
     last.write_bytes(b"y")
-
-    env = os.environ.copy()
-    env["H3_DATA"] = str(data_root)
-
-    port = mock_comfy.server_address[1]
-    result, output_root, _workflow = _run_submit(
-        tmp_path,
-        port,
-        extra=["--first-frame", str(first), "--last-frame", str(last)],
-        env=env,
+    workflow = _keyframe_workflow(tmp_path)
+    result, output_root = _run(
+        ["--prompt", "<Picture 1> opens; <Picture 2> ends.",
+         "--first-frame", str(first), "--last-frame", str(last)],
+        workflow, tmp_path, mock_comfy.server_address[1],
     )
     assert result.returncode == 0, result.stderr + result.stdout
-
     graph = mock_comfy.posted[0]["prompt"]
-    assert _input_values(graph, "first_frame") == ["/data/first.png"]
-    assert _input_values(graph, "last_frame") == ["/data/shots/last.png"]
-    assert mock_comfy.uploads == []
-    assert mock_comfy.upload_fields == []
+    assert graph["1"]["inputs"]["first_frame"] == ["24", 0]
+    assert graph["1"]["inputs"]["last_frame"] == ["25", 0]
+    assert graph["24"]["inputs"]["image"] == "first.png"
+    assert graph["25"]["inputs"]["image"] == "last.png"
+    assert mock_comfy.uploads == ["first.png", "last.png"]
+    assert mock_comfy.upload_fields == ["image", "image"]
+    assert "/data/" not in json.dumps(graph)
+    assert result.stdout.strip() == f"OUTPUT {output_root.resolve() / 'clips' / 'history-name.mp4'}"
 
-    host_out = str(output_root.resolve() / "clips" / "history-name.mp4")
-    assert "OUTPUT" in result.stdout
-    assert host_out in result.stdout
-    assert result.stdout.strip().endswith("history-name.mp4")
-    assert "/opt/ComfyUI/output" not in result.stdout
+
+def test_first_frame_only_leaves_last_frame_unlinked(tmp_path, mock_comfy):
+    first = tmp_path / "first.png"
+    first.write_bytes(b"x")
+    workflow = _keyframe_workflow(tmp_path)
+    result, _ = _run(
+        ["--prompt", "<Picture 1> is the opening frame.", "--first-frame", str(first)],
+        workflow, tmp_path, mock_comfy.server_address[1],
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    graph = mock_comfy.posted[0]["prompt"]
+    assert graph["1"]["inputs"]["first_frame"] == ["24", 0]
+    # The fixture's scalar "" is not a valid IMAGE value; it must not be posted.
+    assert "last_frame" not in graph["1"]["inputs"]
+    assert graph["25"]["inputs"]["image"] == "example.png"
+
+
+def test_first_frame_fails_on_ref2va_graph(tmp_path, mock_comfy):
+    workflow = tmp_path / "tiny-ref2va-workflow.json"
+    shutil.copy(REPO / "tests/fixtures/tiny-ref2va-workflow.json", workflow)
+    first = tmp_path / "sheet.png"
+    first.write_bytes(b"x")
+    result, _ = _run(
+        ["--prompt", "a bird", "--first-frame", str(first)],
+        workflow, tmp_path, mock_comfy.server_address[1],
+    )
+    assert result.returncode != 0
+    assert "--ref-image" in result.stderr
+    assert mock_comfy.posted == []
+    assert mock_comfy.uploads == []
+
+
+def test_picture_tag_beyond_ref_count_fails_before_upload(tmp_path, mock_comfy):
+    workflow = tmp_path / "tiny-ref2va-workflow.json"
+    shutil.copy(REPO / "tests/fixtures/tiny-ref2va-workflow.json", workflow)
+    img = tmp_path / "blue.png"
+    img.write_bytes(b"x")
+    result, _ = _run(
+        ["--prompt", "<Picture 1> blue. <Picture 2> yellow.", "--ref-image", str(img)],
+        workflow, tmp_path, mock_comfy.server_address[1],
+    )
+    assert result.returncode == 1
+    assert "<Picture 2>" in result.stderr
+    assert mock_comfy.uploads == []
+    assert mock_comfy.posted == []
+
+
+def test_picture_tag_on_text_only_fl2va_fails(tmp_path, mock_comfy):
+    result, _ = _run(
+        ["--prompt", "<Picture 1> walks in."],
+        _keyframe_workflow(tmp_path), tmp_path, mock_comfy.server_address[1],
+    )
+    assert result.returncode == 1
+    assert "<Picture 1>" in result.stderr
+    assert mock_comfy.posted == []
+
+
+def test_prompt_file_is_read_verbatim(tmp_path, mock_comfy):
+    text = (
+        "integrated_multimodal_description: [Shot 1] Live-action, a quiet perch.\n\n"
+        "overall_soundscape: Soft wind.\n\n"
+        "non_diegetic_music: N/A"
+    )
+    prompt_file = tmp_path / "prompt.txt"
+    prompt_file.write_text(text + "\n", encoding="utf-8")
+    result, _ = _run(
+        ["--prompt-file", str(prompt_file)],
+        _keyframe_workflow(tmp_path), tmp_path, mock_comfy.server_address[1],
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    graph = mock_comfy.posted[0]["prompt"]
+    assert graph["1"]["inputs"]["prompt"] == text
+    assert graph["4"]["inputs"]["text"] == text
+
+
+def test_prompt_and_prompt_file_are_mutually_exclusive(tmp_path, mock_comfy):
+    prompt_file = tmp_path / "prompt.txt"
+    prompt_file.write_text("x", encoding="utf-8")
+    result, _ = _run(
+        ["--prompt", "a", "--prompt-file", str(prompt_file)],
+        _keyframe_workflow(tmp_path), tmp_path, mock_comfy.server_address[1],
+    )
+    assert result.returncode == 2
+    assert mock_comfy.posted == []
+
+
+def test_existing_local_output_is_not_refetched(tmp_path, mock_comfy):
+    """On the Spark the compose mount already holds the mp4; do not download it again."""
+    output_root = tmp_path / "out"
+    (output_root / "clips").mkdir(parents=True)
+    existing = output_root / "clips" / "history-name.mp4"
+    existing.write_bytes(b"already-here")
+    result, _ = _run(["--prompt", "hello"], _keyframe_workflow(tmp_path), tmp_path, mock_comfy.server_address[1])
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert mock_comfy.view_queries == []
+    assert existing.read_bytes() == b"already-here"
+    assert "REMOTE_OUTPUT" not in result.stdout
+
+
+def test_h3_comfy_url_env_sets_default_base_url(tmp_path, mock_comfy):
+    workflow = _keyframe_workflow(tmp_path)
+    output_root = tmp_path / "out"
+    output_root.mkdir()
+    env = os.environ.copy()
+    env["H3_COMFY_URL"] = f"http://127.0.0.1:{mock_comfy.server_address[1]}"
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(workflow), "--prompt", "hello", "--seed", "7",
+         "--name", "unit", "--output-root", str(output_root)],
+        capture_output=True, text=True, check=False, env=env,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert mock_comfy.posted
+
+
+def _load_module():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("submit_prompt", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_is_loopback_classifies_spark_tailnet_url_as_remote():
+    mod = _load_module()
+    assert mod.is_loopback("http://127.0.0.1:8188")
+    assert mod.is_loopback("http://localhost:8188")
+    assert mod.is_loopback("http://[::1]:8188")
+    assert not mod.is_loopback("http://spark-2a60:8188")
+    assert not mod.is_loopback("http://100.109.63.91:8188")
+
+
+def test_output_path_cannot_escape_output_root(tmp_path):
+    mod = _load_module()
+    with pytest.raises(SystemExit):
+        mod.host_output_path(str(tmp_path), {"filename": "x.mp4", "subfolder": "../../etc"})
 
 
 def test_first_frame_flag_fails_when_graph_has_no_first_frame(tmp_path, mock_comfy):

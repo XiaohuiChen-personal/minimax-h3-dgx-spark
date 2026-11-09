@@ -78,7 +78,9 @@ We once picked the largest frame that upscales neatly. That optimized the wrong 
 
 Ask the sampler for **9** sigma points when the LoRA is “8-step” (the grid includes the final zero). Ask for **5** when using the 4-step LoRA.
 
-Shifts: **6 / 3** with the Turbo LoRA. **12 / 3** without it. Shift follows distillation, not resolution.
+Shifts: **12 / 3** with the shipped Turbo LoRAs and without a LoRA. Shift follows the shift **the LoRA was distilled at**.
+
+**Corrected 2026-11-09.** This card used to say 6 / 3 with Turbo. That came from LightX2V configs for the **768p** FL2V LoRAs. The two LoRAs this repo ships are the **544p** files, and their author lists both as distilled at **12 / 3**: [ModelTC/Minimax-H3-Turbo](https://github.com/ModelTC/Minimax-H3-Turbo) spec table (“FL2VA Turbo 8-step v1.0 — 544p mixed aspect ratio — 12 / 3”; “Ref2VA Turbo 4-step v0.1 — 544p mixed aspect ratio — 12 / 3”; 768p rows are 6 / 3). LightX2V's own `configs/minimax_h3/dmd/minimax_h3_ref2av_4step.json` runs `ref2v_turbo_4step_v0.1` at `video_flow_shift 12.0 / audio_flow_shift 3.0`. ComfyUI's MiniMax H3 default is `shift 12.0 / audio_shift 3.0`, and Comfy-Org's T2V / I2V / R2V templates load these same LoRAs without overriding it. Running a distilled LoRA off its training schedule feeds it sigmas it never learned. If a 768p LoRA is ever added, use 6 / 3 on that graph only. Same-seed A/B on this GB10: [`../measurements/quality-ab-2026-11-09.md`](../measurements/quality-ab-2026-11-09.md) — 12 / 3 was visibly sharper (Laplacian sharpness 143 vs 68 on the same crop), same wall time.
 
 **Why.** Audio is made in the same loop as video. Four steps smear dialogue. Older “Turbo killed the audio” reports were often a one-clock sampler bug.
 
@@ -198,7 +200,7 @@ One GPU. `deploy/compose.yaml` is the documented start path. A raw `docker run` 
 | LoRA | `loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` |
 | TE / VAEs / SPAN | unchanged D-02 / D-04 |
 
-Sampler for Ref2VA: Euler + simple, **4 steps** (5 sigma points including the final zero), shifts **6 / 3**, canvas **960×544**, SPAN 2×, Sage / Sol-Attn `triton_ref` / FBC `H3 Safe` unchanged.
+Sampler for Ref2VA: Euler + simple, **4 steps** (5 sigma points including the final zero), shifts **12 / 3** (D-06, corrected 2026-11-09), canvas **960×544**, SPAN 2×, Sage / Sol-Attn `triton_ref` / FBC `H3 Safe` unchanged.
 
 Default Ref2VA lengths (the three reference graphs share the sampler / canvas / kernels above; a generate may copy and change them):
 

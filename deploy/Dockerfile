@@ -161,6 +161,19 @@ if bad:
 print("no baked MiniMax weight files")
 PY
 
+# Backport upstream ComfyUI fc584aaa (Comfy-Org/ComfyUI#16436, merged 2026-09-22) onto the pin:
+# the pinned H3 VAE tiled_decode blended each tile against its neighbours' raw edges, leaving a
+# step at every tile intersection (6 per frame at 960x544, then enlarged by SPAN). Late layer so
+# the SageAttention / torchaudio builds above stay cached. The CPU test fails the build unless the
+# decode equals the separable overlap-add reference.
+COPY deploy/patches /opt/h3/patches
+RUN set -euxo pipefail; \
+    cd /opt/ComfyUI; \
+    patch -p1 --forward --fuzz=0 < /opt/h3/patches/comfyui-h3-vae-tile-blend.patch; \
+    grep -q 'Backport of upstream ComfyUI fc584aaa' comfy/ldm/minimax/vae.py; \
+    python /opt/h3/patches/test_h3_vae_tile_blend.py
+LABEL comfyui.patches="h3-vae-tile-blend(fc584aaa)"
+
 COPY scripts /opt/h3/scripts
 COPY workflows /opt/h3/workflows
 
