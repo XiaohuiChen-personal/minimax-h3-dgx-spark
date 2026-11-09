@@ -210,8 +210,9 @@ Default Ref2VA lengths (the three reference graphs share the sampler / canvas / 
 | Default generate | `workflows/h3-ref2va-default-8s.json` | 8.00 | 192 | `h3-ref2va` |
 | Long (optional) | `workflows/h3-ref2va-long-15s08.json` | **15.08** | **362** | `h3-ref2va-15s08` |
 | Quality (optional) | `workflows/h3-ref2va-quality-15s08-20step-1344.json` | **15.08** | **362** | `h3-ref2va-quality-15s08` |
+| Max quality (optional) | `workflows/h3-ref2va-maxq-15s08-25step-1344.json` | **15.08** | **362** | `h3-ref2va-maxq-15s08` |
 
-Snap “15 s” / “15.04 s” to **15.08 s / 362** on the Turbo long file. Never invent **15.00** or **15.04**. D-07 still rejects 15.08 s as the everyday default — keep the 8.00 s file as generate default. The quality file is 20-step / 1344×768 / no Turbo / no SPAN; use it only when asked.
+Snap “15 s” / “15.04 s” to **15.08 s / 362** on the Turbo long file. Never invent **15.00** or **15.04**. D-07 still rejects 15.08 s as the everyday default — keep the 8.00 s file as generate default. The quality file is 20-step / 1344×768 / no Turbo / no SPAN; use it only when asked. The max-quality file adds 25 steps, the `beta` scheduler, and Sol-Attn off (~85 min); same rule.
 
 **Why 4 steps.** Official Ref2V Turbo LoRA is 4-step. There is no Comfy-Org 8-step Ref2V LoRA. Do not strap the FL2V 8-step LoRA onto Ref2VA. D-06’s “8 steps for speech” stays on the FL2VA graphs.
 
