@@ -95,8 +95,9 @@ Locked Ref2VA lengths (D-15):
 | Default generate | `workflows/h3-ref2va-default-8s.json` | 8.00 | 192 | `h3-ref2va` |
 | Long (optional) | `workflows/h3-ref2va-long-15s08.json` | **15.08** | **362** | `h3-ref2va-15s08` |
 | Quality (optional) | `workflows/h3-ref2va-quality-15s08-20step-1344.json` | **15.08** | **362** | `h3-ref2va-quality-15s08` |
+| Max quality (optional) | `workflows/h3-ref2va-maxq-15s08-25step-1344.json` | **15.08** | **362** | `h3-ref2va-maxq-15s08` |
 
-Snap “15 s” / “15.04 s” to **15.08 s / 362** on the Turbo long file. Never invent **15.00** or **15.04**. 15.08 is not the everyday default. The quality file is optional (20-step / 1344×768 / no Turbo).
+Snap “15 s” / “15.04 s” to **15.08 s / 362** on the Turbo long file. Never invent **15.00** or **15.04**. 15.08 is not the everyday default. The quality file is optional (20-step / 1344×768 / no Turbo). So is the max-quality file (25-step / `beta` / Sol-Attn off / ~85 min).
 
 Live Ref2VA smokes exist on this Spark: `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` (5.17 s / 124) and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4` (15.08 s / 362). Do not commit the mp4s. SaveVideo adds `_00001_`. Never print `/opt/ComfyUI/output`.
 

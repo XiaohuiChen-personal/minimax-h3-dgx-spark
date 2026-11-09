@@ -73,7 +73,7 @@ The JSON is a shopping list. The hard work is inside one sampler node.
 | Sampler, Sage 2.2, Sol-Attn `triton_ref`, FBC `H3 Safe` | Optional `--ref-image` host files (Ref2VA, variable 1–9) |
 | Length of the chosen default file | Optional first/last-frame files (only if that graph has the keys) |
 
-The optional quality graph (`h3-ref2va-quality-15s08-20step-1344.json`) is the exception: **20 steps**, **1344×768**, no Turbo, no FBC, no SPAN.
+The optional quality graph (`h3-ref2va-quality-15s08-20step-1344.json`) is the exception: **20 steps**, **1344×768**, no Turbo, no FBC, no SPAN. The optional max-quality graph (`h3-ref2va-maxq-15s08-25step-1344.json`) goes further: **25 steps**, `beta` scheduler, Sol-Attn off, same canvas, ~85 min.
 
 Default Ref2VA lengths (D-15). These files are the starting point, not a closed set:
 
@@ -83,8 +83,9 @@ Default Ref2VA lengths (D-15). These files are the starting point, not a closed 
 | Default generate | `workflows/h3-ref2va-default-8s.json` | 8.00 | 192 | `h3-ref2va` |
 | Long (optional) | `workflows/h3-ref2va-long-15s08.json` | **15.08** | **362** | `h3-ref2va-15s08` |
 | Quality (optional) | `workflows/h3-ref2va-quality-15s08-20step-1344.json` | **15.08** | **362** | `h3-ref2va-quality-15s08` |
+| Max quality (optional) | `workflows/h3-ref2va-maxq-15s08-25step-1344.json` | **15.08** | **362** | `h3-ref2va-maxq-15s08` |
 
-Snap “15 s” / “15.04 s” to **15.08 s / 362** on the Turbo long file. Never invent **15.00** or **15.04**. Use the quality file only when the operator asked for no-Turbo / 20-step / 1344×768 (~45 min on this box; no SPAN). If the user says “10 seconds,” snap to **10.13 s** (243 frames) — copy a default graph and set `length` 243, or refuse. Do not invent 10.00 s. Copy, modify, or create a graph when the use case does not fit a default. Text-only / no identity images uses `workflows/h3-fl2va-default-8s.json` (or the 5.17 s smoke) unless a new FL2VA graph is required.
+Snap “15 s” / “15.04 s” to **15.08 s / 362** on the Turbo long file. Never invent **15.00** or **15.04**. Use the quality file only when the operator asked for no-Turbo / 20-step / 1344×768 (~45 min on this box; no SPAN). Use the max-quality file only when they asked for the best possible result (~85 min; pass `--timeout 7200` or more). If the user says “10 seconds,” snap to **10.13 s** (243 frames) — copy a default graph and set `length` 243, or refuse. Do not invent 10.00 s. Copy, modify, or create a graph when the use case does not fit a default. Text-only / no identity images uses `workflows/h3-fl2va-default-8s.json` (or the 5.17 s smoke) unless a new FL2VA graph is required.
 
 ## Identity stills (default Ref2VA) vs FL2VA keyframes
 
@@ -146,7 +147,7 @@ Do not start Docker, do not `docker compose restart`, and do not `kill` ComfyUI 
 ## What is already shipped
 
 - ComfyUI image `h3-spark:local` and `deploy/compose.yaml` (`H3_TASK` defaults to `ref2va`)
-- Reference graphs: FL2VA pair + `h3-ref2va-smoke-5s17.json` / `h3-ref2va-default-8s.json` / `h3-ref2va-long-15s08.json` plus optional `h3-ref2va-quality-15s08-20step-1344.json`. Copies and new graphs are allowed.
+- Reference graphs: FL2VA pair + `h3-ref2va-smoke-5s17.json` / `h3-ref2va-default-8s.json` / `h3-ref2va-long-15s08.json` plus optional `h3-ref2va-quality-15s08-20step-1344.json` and `h3-ref2va-maxq-15s08-25step-1344.json`. Copies and new graphs are allowed.
 - `scripts/submit-prompt.sh` (and friends), including `--ref-image`
 
 Default Ref2VA JSON is in the tree. Live smokes exist on this Spark at `$HOME/h3-output/smoke-ref2va-5s17_00001_.mp4` and `$HOME/h3-output/smoke-ref2va-15s08_00001_.mp4`. Do not commit the mp4s.
