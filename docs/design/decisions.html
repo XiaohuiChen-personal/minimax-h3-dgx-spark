@@ -101,7 +101,7 @@
 
     <div class="adr">
       <header><span class="id">D-06</span><h3>Eight steps when there is talking</h3><span class="status s-adopt">adopted for implementation</span></header>
-      <div class="inner"><p>8 steps for speech. 4 steps only for silent seed-hunting. ComfyUI newer than 2026-08-06 (<code>ModelSamplingAV</code>). Shifts 6/3 with Turbo, 12/3 without. Ask the sampler for 9 sigma points on an “8-step” LoRA.</p></div>
+      <div class="inner"><p>8 steps for speech. 4 steps only for silent seed-hunting. ComfyUI newer than 2026-08-06 (<code>ModelSamplingAV</code>). Shifts 12/3 with the shipped 544p Turbo LoRAs and without a LoRA (corrected 2026-11-09: the LoRA author lists both files as distilled at 12/3; 6/3 is for 768p LoRAs only). Ask the sampler for 9 sigma points on an “8-step” LoRA.</p></div>
     </div>
 
     <div class="adr">
@@ -157,7 +157,7 @@
             </tbody>
           </table>
         </div>
-        <p>Sampler: Euler + simple, <strong>4 steps</strong> (5 sigma points), shifts 6 / 3, 960×544, SPAN 2×. Official Ref2V Turbo is 4-step. Do not strap the FL2V 8-step LoRA onto Ref2VA.</p>
+        <p>Sampler: Euler + simple, <strong>4 steps</strong> (5 sigma points), shifts 12 / 3, 960×544, SPAN 2×. Official Ref2V Turbo is 4-step. Do not strap the FL2V 8-step LoRA onto Ref2VA.</p>
         <div class="scroller">
           <table>
             <thead><tr><th>Role</th><th>File</th><th>Length</th></tr></thead>

@@ -1,6 +1,6 @@
 # `workflows/` — default ComfyUI graphs
 
-Five **Turbo** graphs are the product defaults, plus one optional **quality** Ref2VA graph. Use them as-is, copy and modify them, or add another API-format JSON when the use case needs it. Do not overwrite a shipped JSON unless the operator asked to change that default. One-off graphs go in a new filename. Do not ship a stock Comfy-Org UI-format template unchanged.
+Five **Turbo** graphs are the product defaults, plus an FL2VA **keyframe** graph and one optional **quality** Ref2VA graph. Use them as-is, copy and modify them, or add another API-format JSON when the use case needs it. Do not overwrite a shipped JSON unless the operator asked to change that default. One-off graphs go in a new filename. Do not ship a stock Comfy-Org UI-format template unchanged.
 
 ```text
 workflows/
@@ -10,7 +10,10 @@ workflows/
   h3-ref2va-quality-15s08-20step-1344.json  # optional quality:   1344×768, length 362, 20 steps, no Turbo / SPAN / FBC
   h3-fl2va-smoke-5s17.json                  # text-only smoke:    960×544, length 124, 8 steps, SPAN 2×
   h3-fl2va-default-8s.json                  # text-only generate: 960×544, length 192, 8 steps, SPAN 2×
+  h3-fl2va-keyframes-8s.json                # I2VA / FL2VA / L2VA: as above + LoadImage first_frame / last_frame
 ```
+
+Prompts are H3's structured format, not one-liners: [`../design/prompting.md`](../design/prompting.md). The `prompt` strings committed in these files are placeholders; `--prompt-file` replaces them.
 
 Default generate is **Ref2VA 8.00 s**. Snap “15 s” / “15.04 s” to `h3-ref2va-long-15s08.json` (**15.08 s / 362**, Turbo). Never invent **15.00** or **15.04**. Use the quality file only when the operator asked for no-Turbo / 20-step / 1344×768. Text-only / no identity images uses the FL2VA pair.
 
@@ -33,14 +36,14 @@ Nodes the **Turbo** Ref2VA graphs must use:
 - `MiniMaxH3ReferenceToVideo` — prompt + `ref_image_size=match`. Do **not** commit a `ref_images` dict (submit writes the nested dict). No flat `ref_image_*` keys on this node
 - Nine `LoadImage` nodes titled `ref_image_0`…`ref_image_8`
 - D-15 DiT + Ref2V 4-step LoRA; D-02 TE / VAEs; D-04 SPAN
-- `ModelSamplingAV` — two clocks, shifts 6 / 3
+- `ModelSamplingAV` — two clocks, shifts **12 / 3** (the Ref2V 4-step v0.1 LoRA was distilled at 12 / 3; see D-06)
 - Sampler: Euler + simple, **4 steps** (request 5 sigma points — the grid includes the last zero)
-- SageAttention 2.2 path, Sol-Attn `triton_ref`, FirstBlockCache `H3 Safe`
+- SageAttention 2.2 path, Sol-Attn `triton_ref` (`tau` 1.3, `dense_blocks` `0-2,-1`), FirstBlockCache `H3 Safe`
 - Video VAE decode + audio VAE decode, SPAN 2×, Save mp4 with audio
 
 ## Ref2VA quality (optional, not the 15 s snap)
 
-`h3-ref2va-quality-15s08-20step-1344.json` follows the official Comfy R2V quality knobs on this box: **20 steps**, **1344×768**, **no Turbo LoRA**, `res_multistep`, shifts **12 / 3**, `ref_image_size=max`, Sage 2.2 + Sol-Attn `triton_ref`. **No** FirstBlockCache, **no** EasyCache, **no** SPAN (native 1344×768 out). Still the pruned FP8 Ref2VA DiT. Wall time on this GB10 is about **45 min** (`2707.79 s`). Do not strap the FL2V LoRA onto it. Do not “fix” it back to 4-step Turbo / 960×544 / SPAN unless the operator asked to leave the quality path.
+`h3-ref2va-quality-15s08-20step-1344.json` follows the official Comfy R2V quality knobs on this box: **20 steps**, **1344×768**, **no Turbo LoRA**, `res_multistep`, shifts **12 / 3**, `ref_image_size=max`, Sage 2.2 + Sol-Attn `triton_ref` (`dense_blocks` `0-2,-1`). **No** FirstBlockCache, **no** EasyCache, **no** SPAN (native 1344×768 out). Still the pruned FP8 Ref2VA DiT. Wall time on this GB10 is about **45 min** (`2707.79 s`). Do not strap the FL2V LoRA onto it. Do not “fix” it back to 4-step Turbo / 960×544 / SPAN unless the operator asked to leave the quality path.
 
 Operator note: Turbo quality is acceptable on FL2VA (text-only or first-frame); keep **8 steps** there for smoother motion. For Ref2VA identity stills, prefer this Turbo-off file. Even then, monk parakeets (Quakers) can still drift toward a budgerigar-like parakeet prior. Full write-up: [`../measurements/turbo-vs-base.md`](../measurements/turbo-vs-base.md) §16.
 
@@ -65,19 +68,25 @@ Nodes the FL2VA graphs must use:
 
 - `MiniMaxH3ImageToVideo` — prompt + optional `first_frame` / `last_frame`. Default T2V JSONs omit those keys; add them on a copy when the use case is I2VA / FL2VA keyframes
 - D-02 checkpoints only (Comfy-Org files, including the 8-step LoRA — not the template’s `lightx2v` URL)
-- `ModelSamplingAV` — two clocks, shifts 6 / 3 with Turbo
+- `ModelSamplingAV` — two clocks, shifts **12 / 3** (the FL2V 8-step v1.0 LoRA is the 544p file, distilled at 12 / 3; 6 / 3 is only for 768p LoRAs)
 - Turbo LoRA: `minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16` at strength 1.0
 - Sampler: Euler + simple, **8 steps** (request 9 sigma points)
-- SageAttention 2.2, Sol-Attn `triton_ref`, FirstBlockCache `H3 Safe`
+- SageAttention 2.2, Sol-Attn `triton_ref` (`tau` 1.3, `dense_blocks` `0-2,-1`), FirstBlockCache `H3 Safe`
 - Video VAE decode + audio VAE decode, SPAN 2×, Save mp4 with audio
+
+## FL2VA keyframes (I2VA / FL2VA / L2VA)
+
+`h3-fl2va-keyframes-8s.json` is `h3-fl2va-default-8s.json` plus two unlinked `LoadImage` nodes titled `first_frame` and `last_frame`. `MiniMaxH3ImageToVideo.first_frame` / `last_frame` are **IMAGE sockets**, so a path string can never work there. `submit-prompt.sh --first-frame` / `--last-frame` uploads the still and links the titled `LoadImage` into the node. A keyframe you do not pass stays unlinked (`None`). The default T2V graphs have no titled `LoadImage`, so the flags fail-close there.
+
+Prompt: start with the official alignment line ([`../design/prompting.md`](../design/prompting.md)). `<Picture 1>` is the first attached keyframe. A keyframe is a real frame of the shot. Identity sheets are Ref2VA `--ref-image`.
 
 ## Free fields the submit script may patch
 
-- text prompt
+- text prompt (`--prompt-file` for the structured multi-line format)
 - seed
 - output filename
-- optional `--ref-image` host files (Ref2VA only; uploaded via `POST /upload/image`)
-- optional first/last-frame image paths (only if that graph has the keys)
+- optional `--ref-image` local files (Ref2VA only; uploaded via `POST /upload/image`)
+- optional `--first-frame` / `--last-frame` local files (keyframe graphs only; uploaded and linked)
 
 Canvas, steps, length, LoRA on/off, and extra nodes may change on a **copy** or a new file when the use case needs it. 3-view sheets are Ref2VA `--ref-image`, **not** `first_frame`.
 

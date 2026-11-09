@@ -10,13 +10,14 @@ SUBMIT="$ROOT/scripts/submit-prompt.sh"
 
 OFFLINE_MP4=""
 PROMPT=""
+PROMPT_FILE=""
 SEED=""
 NAME=""
 FORWARD=()
 
 usage() {
   echo "usage: $0 --offline-mp4 <path>" >&2
-  echo "       $0 --prompt TEXT --seed N --name PREFIX [--workflow PATH] [submit-prompt flags]" >&2
+  echo "       $0 (--prompt TEXT | --prompt-file FILE) --seed N --name PREFIX [--workflow PATH] [submit-prompt flags]" >&2
   exit 2
 }
 
@@ -34,6 +35,10 @@ while [[ $# -gt 0 ]]; do
       PROMPT="${2:?}"
       shift 2
       ;;
+    --prompt-file)
+      PROMPT_FILE="${2:?}"
+      shift 2
+      ;;
     --seed)
       SEED="${2:?}"
       shift 2
@@ -42,7 +47,7 @@ while [[ $# -gt 0 ]]; do
       NAME="${2:?}"
       shift 2
       ;;
-    --first-frame|--last-frame|--base-url|--output-root|--ref-image)
+    --first-frame|--last-frame|--base-url|--output-root|--ref-image|--timeout)
       FORWARD+=("$1" "${2:?}")
       shift 2
       ;;
@@ -90,13 +95,19 @@ if [[ ! -f "$WORKFLOW" ]]; then
   echo "error: missing workflow $WORKFLOW" >&2
   exit 1
 fi
-if [[ -z "$PROMPT" || -z "$SEED" || -z "$NAME" ]]; then
-  echo "error: live mode requires --prompt --seed --name" >&2
+if [[ -z "$PROMPT" && -z "$PROMPT_FILE" ]] || [[ -n "$PROMPT" && -n "$PROMPT_FILE" ]] \
+  || [[ -z "$SEED" || -z "$NAME" ]]; then
+  echo "error: live mode requires exactly one of --prompt / --prompt-file, plus --seed --name" >&2
   exit 2
+fi
+if [[ -n "$PROMPT_FILE" ]]; then
+  PROMPT_ARGS=(--prompt-file "$PROMPT_FILE")
+else
+  PROMPT_ARGS=(--prompt "$PROMPT")
 fi
 
 set +e
-out="$("$SUBMIT" "$WORKFLOW" --prompt "$PROMPT" --seed "$SEED" --name "$NAME" ${FORWARD[@]+"${FORWARD[@]}"})"
+out="$("$SUBMIT" "$WORKFLOW" "${PROMPT_ARGS[@]}" --seed "$SEED" --name "$NAME" ${FORWARD[@]+"${FORWARD[@]}"})"
 rc=$?
 set -e
 if [[ "$rc" -ne 0 ]]; then

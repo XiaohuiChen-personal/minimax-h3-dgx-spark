@@ -15,9 +15,9 @@ Kernel checks on this GB10 (2026-08-23), no full H3 clip yet:
 |---|---|---|---|
 | 1 | Smaller weights (D-02) | Required | FP8 DiT + INT8 prompt reader. Capacity first; FP8 is also faster here. |
 | 2 | Small frame + SPAN | Always | Generate 960×544, enlarge after. Also keeps tokens ~25k, under Sage’s ~160k “pure noise” cliff. |
-| 3 | Turbo LoRA, **8 steps** | Yes | Comfy-Org 8-step file on the **pruned** DiT. Not 4 steps for talking. |
+| 3 | Turbo LoRA, **8 steps** | Yes | Comfy-Org 8-step file on the **pruned** DiT, at the shift it was distilled at (**12 / 3** for these 544p files; D-06). Not 4 steps for talking. |
 | 4 | SageAttention **2.2** | Yes | Install the 2.2.0 wheel built for this chip (`sm_121`). Never version 3. |
-| 5 | Sol-Attn | Yes, pinned | Kernel **`triton_ref` only**. |
+| 5 | Sol-Attn | Yes, pinned | Kernel **`triton_ref` only**. `tau` 1.3, `dense_blocks` **`0-2,-1`** (first and last blocks are the most approximation-sensitive; LightX2V's H3 Sol config also keeps layer 0 dense). |
 | 6 | FirstBlockCache | Yes, gentle | Preset **`H3 Safe`**. Expect little skip at 8 Turbo steps. That is OK. |
 
 ## Never turn on
@@ -43,6 +43,8 @@ Kernel checks on this GB10 (2026-08-23), no full H3 clip yet:
 **Sage cliff.** Some FP8 attention kernels have emitted pure noise above ~160k packed tokens ([Comfy-Org/ComfyUI#15263](https://github.com/Comfy-Org/ComfyUI/issues/15263)). Native 1920×1088 / 15 s is ~186k. **960×544 / 8.00 s is ~25k.** Generating small is what makes Sage safe here.
 
 **Cache vs Turbo.** On a 20-step Spark run, FirstBlockCache at 0.08 skipped **zero** steps. At 8 distilled steps there is even less to skip. Keep `H3 Safe`. Do not promise a 4× cache headline.
+
+**Sparse attention vs detail.** Sol-Attn is approximate. With every block sparse, the first and last transformer blocks — the most sensitive ones — also take the approximate path. The graphs keep blocks `0-2` and the last block dense (they fall back to Sage 2.2). That costs a few percent of attention time and buys fidelity. The scheduled Sol node (dense early steps, `tau` ramp) is the next lever if detail is still soft; it is not wired yet.
 
 ## Memory
 

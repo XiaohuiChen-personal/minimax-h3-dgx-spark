@@ -8,6 +8,8 @@ Shared launch: `main.py --listen 0.0.0.0 --port 8188 --fast fp8_matrix_mult --di
 
 Product Ref2VA graphs use `minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` at `strength_model=1.0`. Locked default is **4 steps**. Creative tries below also ran that same LoRA at **8 steps**. Canvas is **960×544**, Euler+simple, shifts **6 / 3**, FirstBlockCache `H3 Safe`, then SPAN 2× and crop to 1920×1080. FL2VA product graphs use the **8-step** FL2V Turbo LoRA on the same canvas.
 
+> **Correction 2026-11-09 — every Turbo run below used shift 6 / 3, which is off-spec for these LoRAs.** The LoRA author lists both shipped files as distilled at **12 / 3** at 544p ([ModelTC/Minimax-H3-Turbo](https://github.com/ModelTC/Minimax-H3-Turbo) spec table). LightX2V's Ref2VA 4-step config runs `ref2v_turbo_4step_v0.1` at 12 / 3. 6 / 3 is only for the 768p FL2V LoRAs. The Turbo identity misses (v1–v5) were sampled off the LoRA's training schedule, so they are not a clean verdict on Turbo Ref2VA. The graphs now use 12 / 3 (D-06). Wall times are unaffected: shift changes which sigmas are visited, not the cost of a step. A same-seed 6 / 3 vs 12 / 3 re-run on this box is still owed. The no-Turbo runs (v6, v8) already used 12 / 3.
+
 ## What “Turbo off” means here
 
 Shipped quality graph: `workflows/h3-ref2va-quality-15s08-20step-1344.json`. The 8.00 s sibling used for v6 lived in `temp/` and was deleted with that folder. No `LoraLoaderModelOnly`, **20 steps**, **1344×768**, `res_multistep`, shifts **12 / 3**, `ref_image_size=max`, no FirstBlockCache, no EasyCache, no SPAN (native 1344×768 out). Still the pruned FP8 Ref2VA DiT. This is **not** Hailuo / MiniMax API 2K Omni Reference.
