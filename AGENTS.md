@@ -67,6 +67,8 @@ ComfyUI on the Spark (port **8188**) is the only generate server, wherever the a
 
 Longer product card: `design/operator.md`. Prompt format: `design/prompting.md` (read it before writing any prompt).
 
+**Claude Code, full video requests:** follow the skill `.claude/skills/h3-make-video/`. The operator asked for that skill to use the max-quality graph `workflows/h3-ref2va-maxq-15s08-25step-1344.json` (~85 min for 15.08 s; state the time up front). It adds an adversarial prompt review, 10-minute progress reports, an every-frame review, and delivery to the MacBook's `~/Downloads`. Requests for speed (quick test, smoke, draft, Turbo) or for a named graph follow this section; D-15's Turbo defaults are unchanged.
+
 ### 0. Where are you running?
 
 ```bash
@@ -83,7 +85,7 @@ When remote:
 - This operator's Spark is the Tailscale node **`spark-2a60`** (`ssh spark-2a60` works; its clone is `~/Projects/minimax-h3-dgx-spark`). Another operator: use your Spark's name from `tailscale status`.
 - `export H3_COMFY_URL=http://spark-2a60:8188`, then run `./scripts/submit-prompt.sh` from **this** machine's clone. It needs only `python3` (stdlib). It uploads local `--ref-image` / `--first-frame` / `--last-frame` files over HTTP — do **not** `scp` them first. The graph travels in the POST, so the Spark's clone does not have to match.
 - Never run H3, Docker, the image, or GPU torch on the remote machine. Never `docker compose` on the laptop.
-- `ssh spark-2a60 …` is for read-only checks (`docker ps`, `docker logs`, `ls ~/h3-output`) and for starting ComfyUI **only when the user asked**.
+- `ssh spark-2a60 …` is for read-only checks (`docker ps`, `docker logs`, `ls ~/h3-output`), for CPU-only review scripts run with the Spark's system `python3` that write only under `/tmp/h3-review/` (the skill's `review_video.py`), and for starting ComfyUI **only when the user asked**.
 
 ### 1. Confirm the server
 
