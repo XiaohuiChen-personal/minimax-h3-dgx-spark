@@ -69,7 +69,7 @@ Tell the user when you use an untested variant. The clip length in seconds is `l
 
 - **No identity stills.** This graph needs 1–9. AGENTS.md routes 0 stills to FL2VA. The only tested FL2VA path is the 8-step Turbo graph `workflows/h3-fl2va-default-8s.json`: good, but not this quality. Offer it, or ask the user for reference images. Do not quietly build an untested no-Turbo FL2VA graph. On the FL2VA path, the three-field prompt from `design/prompting.md` applies. The linter handles it, and the watcher works the same way, but expect about 5 min, not 85.
 - **The picture is a frame of the shot, not an identity reference.** "Animate this picture", "start or end on this image" are keyframe tasks on `workflows/h3-fl2va-keyframes-8s.json` (8-step Turbo; AGENTS.md §4). Identity stills and keyframes are different graphs. Say it is not the max-quality path.
-- **Longer than 15.08 s.** H3 tops out at 15.08 s per clip. Offer several clips that share the same subject definitions and style sentence, each a separate ~85-minute run, cut together afterwards.
+- **Longer than 15.08 s.** H3 tops out at 15.08 s per clip. Offer several clips that share the same subject definitions and style sentence, each a separate ~85-minute run, cut together afterwards. For one continuous take without cuts, chain the clips instead; see **Continuous video across several clips** below.
 - **Dialogue.** Speech has not been measured on this graph. Ref2VA Turbo is weak for speech (D-06). This graph has no Turbo, which should help. Tell the user it is unverified, and follow the speech rules in `references/prompt-guide.md` §10.
 
 **Reference-token budget.** Each still costs `(w/32) × (h/32)` tokens after scaling down to at most a 2048 px short edge, in **every** step. The video itself is 107,856 tokens at 1344×768×362.
@@ -220,6 +220,96 @@ Write the report in the user's language with the template in `frame-review.md`:
 
 Then ask whether to revise. Do not start another 85-minute run unless the user asks, or asked up front for automatic revisions (then follow their count). Each revision repeats Steps 2–8, with a fresh review and a new `--name`.
 
+## Continuous video across several clips (Masked AV chain)
+
+Use this when the user wants **one continuous take** longer than one clip (for example TikTok's over-60-second rule), or asks for clips that join without a cut. A single clip still follows Steps 0–8 unchanged. Separate shots that are simply cut together need none of this: make each one as a single clip.
+
+**How it works.**
+
+- **Graphs:** `workflows/h3-ref2va-maxq-chain-start-1344.json` makes segment 1, and `workflows/h3-ref2va-maxq-chain-continue-1344.json` makes every later segment. Both have the max-quality settings above, and both also save the sampled latents (`<name>-latent-video_00001_.latent` and `<name>-latent-audio_00001_.latent` in the Spark's `~/h3-output`).
+- **The continuation:** the continue graph copies the previous segment's last **39 frames** into its own first 39 frames. That is 12 video latent slots plus 65 audio ticks, which is 1.625 s of picture and sound. It then locks them with H3's native per-stream denoise masks (ComfyUI PR #15375, included in our pin). The model generates everything after them. The picture, the motion and the music therefore continue across the joint, with no re-encode in between.
+- **Length:** set it on node `50` (`value`), not on node `10`. Every later segment adds `length − 39` new frames:
+
+  | Segment length | New frames per later segment |
+  |---|---|
+  | 192 (8.00 s) | 153 (6.375 s) |
+  | 243 (10.13 s) | 204 (8.50 s) |
+  | 362 (15.08 s) | 323 (13.46 s) |
+
+  Example: 4 × 362 + 1 × 243 = 1535 frames = 63.96 s.
+- **Keep these identical across a chain:** canvas, graph family, stills, and their order. The latent shapes must match. Use the same seed unless the user asks otherwise.
+
+**Measured on this box (2026-11-15, smoke tests at 384×384):**
+
+- The locked head re-decodes almost identically: mean difference 1.9–4.5 of 255. The audio head matches the previous tail to 11–19 dB below the signal level.
+- With a generic prompt and 6 steps, the newly generated part changed the colour grade at the joint (ΔE 24.8, saturation −43 %).
+- With 20 steps and the **same explicit scene description in both prompts**, the joint was invisible: ΔE 0.24, luma +0.3 %, saturation −0.5 %.
+- Rule that follows: the locked frames carry motion, but the prompt must carry the look.
+
+**Measured on the first real chain (《滚球》, 2 × 8.00 s, 768×1344, maxq, 2026-11-15):**
+
+- **Render time:** 30:45 for segment 1 and 32:34 for segment 2. That is 69.7 vs 74.0 s/step, so the masks add about 6 %.
+- **Picture across the joint:**
+  - Overlap re-decode difference 1.8/255.
+  - Colour ΔE 0.44.
+  - Frame change at the joint 0.34, against a 0.39 median. Motion before and after the joint was 0.93 and 1.20, so there was no freeze. The ball kept rolling straight through it.
+  - The seam-ratio column showed 4.77, but the cause was a jump that segment 1 already had at its own VAE group boundary (frame 188). Single clips have these jumps too.
+- **Identity:** both bears stayed on-model across the joint, with no bow-tie bleed.
+- **Drift:** on the static background, sharpness (Laplacian variance) rose about 30 % over the first 2–4 s after the joint, then held. The carpet went from 320 to 423. Side by side the change is subtle: a crisper carpet pile. This matches Continuum issue #13 after a single joint, so expect it to compound over many joints.
+- **Audio:** continuous, with no click (step ratio 0.12). Two defects:
+  - Segment 1's music tapered in its last ~0.2 s even though the prompt said "without ending". That taper is inside the locked latent, so a 0.2 s lull sits at the joint.
+  - The generated music was ~7 dB quieter (beat peaks −18.7 vs −11.3 dBFS). `stitch_segments.py` now matches the level by default: +5.4 dB here, with 0.085 % of samples soft-limited.
+- **Ideas, untested:**
+  - End the locked context ~0.7 s before a segment's end (a "safe handover") to skip the end-of-clip taper.
+  - Write the music level explicitly ("as loud as before, beat peaks strong") in the continuation prompt.
+
+**Steps.**
+
+1. **Plan the whole story by segment.** Give each segment its own beats table. Put each joint inside an action, ideally a continuous motion such as a walk, a roll or a pour. A joint during a frozen pose hides problems, and a joint at an action's start invites a stutter. Tell the user the total time: a segment costs as much as a single clip of the same length.
+2. **Segment 1** = Steps 1–7 on a copy of the chain-start graph, named `--name <story>-s1`.
+   - The prompt ends mid-action.
+   - The music is "still playing at the last frame, without slowing down or ending".
+   - Submit prints two `LATENT …` lines; record them on the run card.
+3. **Read segment 1's last 1.625 s before you write anything for segment 2.** Those frames (`length − 39` to `length − 1`) get locked into segment 2 exactly as rendered, picture and sound.
+   - Write down the state at the **first** locked frame and at the **last** one: positions, facing, poses, arms, objects and their motion (where they are, which way they move, how fast), expressions, light, real bear sizes (measured, not guessed), and what the music is doing.
+   - Note what changes between the two. In 《滚球》 2026-11-15 the ball was mid-gap at the first locked frame and at the bear's foot by the last.
+   - The plan's intended end state does not count. Beats land early or late, so the real end state often differs from it.
+   - If segment 1 is wrong, stop and ask the user whether to redo it. Every later segment inherits it.
+4. **Segment k+1 prompt.**
+   - Copy `subject_definitions`, the style sentence and the light sentence **verbatim** from segment 1.
+   - Describe the room or scene **as rendered** (objects segment 1 added, the real light).
+   - "From the first frame …" means the **first** locked frame, not the last.
+   - **No new beat before 1.625 s.** Describe what the locked frames already do, at the times they do it, and continue what is already moving.
+     - [observed] A first draft for 《滚球》 stopped the ball at 0.6 s. The locked frames had it still rolling at 1.6 s. The reviewer rated it Critical, because the model would fix the contradiction with a jump right at the joint.
+   - Keep music and ambience the same instruments and tempo, and let only the last segment end the music.
+   - Run the two review rounds. Give the reviewer the locked window's sheets and the last-frame keyframe, and say that the first 1.625 s are fixed, audio included.
+5. **Submit** a copy of the chain-continue graph (same canvas, same node `50` value or another legal length) with `--continue-from <previous --name>`. The flag fails before upload when the graph and the flag do not match. The server fails closed if the latent file is missing.
+6. **Review segment k+1** with Step 7, as a single clip.
+7. **Stitch and measure on the Spark.** This step is CPU only and writes only under `/tmp/h3-review/`:
+   ```bash
+   ssh spark-2a60 "python3 - /tmp/h3-review/<story>-chain <story>-chain ~/h3-output/<story>-s1_00001_.mp4 ~/h3-output/<story>-s2_00001_.mp4" < SKILL/scripts/stitch_segments.py
+   scp -q -r spark-2a60:/tmp/h3-review/<story>-chain WORK/
+   ```
+   1. Read `report.md`, every `seam-K.jpg` (stitched frames around each joint) and every `overlap-K.jpg` (segment k's tail next to segment k+1's head).
+   2. Check each seam against these thresholds (all from the smoke tests above):
+
+      | Check | Seamless |
+      |---|---|
+      | Overlap MAE | below about 6 |
+      | ΔE | below 2 |
+      | Motion after the joint | about the same as before it (much lower means a freeze) |
+      | Seam ratio | below about 2; judge it on the sheet when motion is small, because the ratio of two small numbers is noisy |
+      | Audio overlap difference | at least 10 dB below the level |
+      | Audio step ratio | not far above the clip's normal steps |
+
+   3. Run Step 7 on the stitched mp4 as well (`/tmp/h3-review/<story>-chain/<story>-chain.mp4`).
+8. **Deliver** each segment and the stitched mp4 to `~/Downloads` (Step 6; the stitched file comes from `/tmp/h3-review/…` by `scp`). Report per segment, then per seam, then the chain as a whole: identity in the first vs the last segment, and drift.
+
+**Limits.**
+
+- **Drift accumulates over many joints.** In ComfyUI-H3-Continuum issue #13, contrast and sharpness rise chunk by chunk, and it has no fix there. Prefer fewer, longer segments. Cut to a new scene every 2–3 segments: a cut restarts from the stills, while a joint inherits the previous frames.
+- **A/V offset:** a segment length whose audio is not a whole number of ticks (`length × 40 / 24`) shifts the audio by up to ±8 ms per joint. That applies to 362 and 124; 192 and 243 are exact. The stitch report prints the offset.
+
 ## Files
 
 - `scripts/lint_prompt.py`: format checks (sections, shot markers and timestamps, labels, `<d>`, keyframe marks, word count, quoted text). Stdlib only. Exit 1 = errors.
@@ -233,5 +323,6 @@ Then ask whether to revise. Do not start another 85-minute run unless the user a
   | 4 | missing |
   | 5 | unreachable |
 - `scripts/review_video.py`: overview and detail sheets, cuts (a fast camera move is not counted as a cut), camera motion, stabilized views, keyframes, audio levels, truncation and audio-length flags. Needs OpenCV + PyAV (the Spark).
+- `scripts/stitch_segments.py`: stitches Masked AV chain segments and measures each seam. It drops each later segment's locked head. The picture switches at the end of the overlap with a 4-frame crossfade. The sound switches in the middle of the overlap with a 15 ms crossfade, because a segment's last ~0.2 s of audio carry the decoder's fade, measured at −36 dBFS on 2026-11-15. Both switch points are flags. The audio is aligned on latent ticks. It reports overlap re-decode difference, seam ratio, colour ΔE, motion before and after the joint, audio levels, steps and overlap difference, and per-segment drift. It writes `seam-K.jpg` and `overlap-K.jpg`. Needs OpenCV + PyAV (the Spark).
 - `tests/test_scripts.py`: offline lint and watcher tests; the watcher runs against a fake ComfyUI. Run `python3 -m pytest -q .claude/skills/h3-make-video/tests`.
 - `tests/test_review_video.py`: synthetic pan, cut and static clips for `review_video.py`. It needs OpenCV, so run it on the Spark (the command is in its docstring); under pytest on the Mac it skips.

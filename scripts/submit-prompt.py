@@ -11,6 +11,12 @@ Patched node input names (scalars only; ComfyUI links like ["4", 0] are skipped)
   MiniMaxH3ReferenceToVideo.ref_images      <- nested dict from --ref-image
   MiniMaxH3ImageToVideo.first_frame / last_frame
                        <- link to the LoadImage titled first_frame / last_frame
+  SaveLatent titled save_latent_<stream>
+                       <- filename_prefix "<name>-latent-<stream>" (chain graphs)
+  LoadLatent titled prev_latent_<stream>
+                       <- "<prev>-latent-<stream>_00001_.latent [output]" from
+                          --continue-from <prev> (chain-continue graph; the file is
+                          already in the server's output folder, nothing is uploaded)
 
 Works on the Spark (default http://127.0.0.1:8188) and from another machine
 (--base-url or $H3_COMFY_URL, e.g. http://spark-2a60:8188 over Tailscale).
@@ -47,6 +53,11 @@ REF_IMAGE_TITLE_RE = re.compile(r"^ref_image_(\d+)$")
 FLAT_REF_IMAGE_KEY_RE = re.compile(r"^ref_image_\d+$")
 # The H3 tokenizer prefixes each attached still with "<Picture N>: " (1-based).
 PICTURE_TAG_RE = re.compile(r"<Picture\s+(\d+)>")
+# Chain graphs (workflows/h3-ref2va-maxq-chain-*.json): a segment saves its sampled
+# video/audio latents; the next segment loads them from the server's output folder.
+SAVE_LATENT_TITLE_RE = re.compile(r"^save_latent_([a-z]+)$")
+PREV_LATENT_TITLE_RE = re.compile(r"^prev_latent_([a-z]+)$")
+LATENT_FIRST_COUNTER = "00001"
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8188"
 LOOPBACK_HOSTS = ("localhost", "::1")
@@ -277,6 +288,73 @@ def _drop_unwired_keyframe_scalars(graph: dict[str, Any]) -> None:
                 del inputs[key]
 
 
+def _titled_nodes(graph: dict[str, Any], class_type: str, title_re: re.Pattern) -> list[tuple[str, dict, str]]:
+    out = []
+    for node_id, node in graph.items():
+        if not isinstance(node, dict) or node.get("class_type") != class_type:
+            continue
+        meta = node.get("_meta")
+        title = meta.get("title") if isinstance(meta, dict) else None
+        match = title_re.fullmatch(title) if isinstance(title, str) else None
+        if match:
+            out.append((node_id, node, match.group(1)))
+    return out
+
+
+def latent_prefix(name: str, stream: str) -> str:
+    return f"{name}-latent-{stream}"
+
+
+def name_chain_latents(graph: dict[str, Any], name: str) -> None:
+    """SaveLatent nodes titled save_latent_<stream> get "<name>-latent-<stream>"."""
+    for _, node, stream in _titled_nodes(graph, "SaveLatent", SAVE_LATENT_TITLE_RE):
+        node.setdefault("inputs", {})["filename_prefix"] = latent_prefix(name, stream)
+
+
+def wire_continue_from(graph: dict[str, Any], prev_name: str | None) -> str | None:
+    """Point LoadLatent titled prev_latent_<stream> at the previous segment. Fail-close.
+
+    The previous segment's SaveLatent wrote "<prev>-latent-<stream>_00001_.latent"
+    into the server's output folder; "[output]" makes LoadLatent read it there.
+    """
+    loads = _titled_nodes(graph, "LoadLatent", PREV_LATENT_TITLE_RE)
+    if prev_name is None:
+        if loads:
+            return (
+                "error: this graph continues a previous segment (LoadLatent titled "
+                "prev_latent_*); pass --continue-from <previous --name>"
+            )
+        return None
+    if not loads:
+        return (
+            "error: --continue-from set but the graph has no LoadLatent titled "
+            "prev_latent_video / prev_latent_audio (use a chain-continue graph)"
+        )
+    if "/" in prev_name or "\\" in prev_name or not prev_name.strip():
+        return f"error: --continue-from must be a bare --name, got {prev_name!r}"
+    streams = sorted(stream for _, _, stream in loads)
+    if streams != ["audio", "video"]:
+        return f"error: expected prev_latent_video and prev_latent_audio, found {streams}"
+    for _, node, stream in loads:
+        filename = f"{latent_prefix(prev_name, stream)}_{LATENT_FIRST_COUNTER}_.latent"
+        node.setdefault("inputs", {})["latent"] = f"{filename} [output]"
+    return None
+
+
+def saved_latents(entry: dict[str, Any]) -> list[str]:
+    """Server-relative paths of SaveLatent outputs in a history entry."""
+    found = []
+    outputs = entry.get("outputs") or {}
+    if not isinstance(outputs, dict):
+        return found
+    for node_out in outputs.values():
+        items = node_out.get("latents") if isinstance(node_out, dict) else None
+        for item in items if isinstance(items, list) else ():
+            if isinstance(item, dict) and item.get("filename") and _is_output_media(item):
+                found.append(server_relpath(item))
+    return sorted(found)
+
+
 def check_picture_tags(prompt: str, graph: dict[str, Any], n_refs: int, n_keyframes: int) -> str | None:
     """Return an error if the prompt names a <Picture N> that no attached still backs.
 
@@ -480,6 +558,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Local identity still; repeatable (max 9). Uploaded via POST /upload/image.",
     )
     parser.add_argument(
+        "--continue-from",
+        default=None,
+        help="Chain-continue graphs only: the --name of the previous segment, whose saved "
+        "latents (<name>-latent-video/audio_00001_.latent) sit in the server's output folder.",
+    )
+    parser.add_argument(
         "--base-url",
         default=None,
         help=f"ComfyUI origin (default $H3_COMFY_URL or {DEFAULT_BASE_URL})",
@@ -534,6 +618,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     _patch_existing_scalars(graph, NAME_KEYS, args.name)
+    name_chain_latents(graph, args.name)
+    error = wire_continue_from(graph, args.continue_from)
+    if error:
+        print(error, file=sys.stderr)
+        return 1
     _drop_unwired_keyframe_scalars(graph)
     if args.first_frame:
         wire_keyframe(graph, base, "first_frame", args.first_frame)
@@ -570,6 +659,9 @@ def main(argv: list[str] | None = None) -> int:
             if item is not None:
                 local = host_output_path(output_root, item)
                 remote = not is_loopback(base)
+                for latent in saved_latents(entry):
+                    # Chain latents stay on the server; the next segment reads them there.
+                    print(f"LATENT ~/h3-output/{latent}", flush=True)
                 if remote:
                     host = urllib.parse.urlsplit(base).hostname
                     # D-14 compose mounts the server's ~/h3-output as ComfyUI's output dir.

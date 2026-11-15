@@ -924,3 +924,84 @@ def test_ref_image_deletes_flat_keys_keeps_ref_image_size(tmp_path, mock_comfy):
     assert str(tmp_path / "blue.png") not in json.dumps(graph)
     assert "/data/" not in graph["24"]["inputs"]["image"]
     assert "/data/" not in graph["25"]["inputs"]["image"]
+
+
+# --- Masked AV chain graphs (workflows/h3-ref2va-maxq-chain-*.json) ---
+
+CHAIN_START = REPO / "workflows" / "h3-ref2va-maxq-chain-start-1344.json"
+CHAIN_CONTINUE = REPO / "workflows" / "h3-ref2va-maxq-chain-continue-1344.json"
+
+
+def _chain_history(name: str) -> dict:
+    return {
+        "abc": {
+            "status": {"status_str": "success", "completed": True},
+            "outputs": {
+                "23": {"images": [{"filename": f"{name}_00001_.mp4", "subfolder": "", "type": "output"}]},
+                "41": {"latents": [{"filename": f"{name}-latent-video_00001_.latent", "subfolder": "", "type": "output"}]},
+                "42": {"latents": [{"filename": f"{name}-latent-audio_00001_.latent", "subfolder": "", "type": "output"}]},
+            },
+        }
+    }
+
+
+def _titled(graph: dict, title: str) -> dict:
+    nodes = [n for n in graph.values() if (n.get("_meta") or {}).get("title") == title]
+    assert len(nodes) == 1, title
+    return nodes[0]
+
+
+def test_chain_start_names_latents_and_prints_them(tmp_path, mock_comfy):
+    mock_comfy.history_payload = _chain_history("unit")
+    workflow = tmp_path / "start.json"
+    shutil.copy(CHAIN_START, workflow)
+    result, _ = _run(["--prompt", "hello"], workflow, tmp_path, mock_comfy.server_address[1])
+    assert result.returncode == 0, result.stderr
+    graph = mock_comfy.posted[-1]["prompt"]
+    assert _titled(graph, "save_latent_video")["inputs"]["filename_prefix"] == "unit-latent-video"
+    assert _titled(graph, "save_latent_audio")["inputs"]["filename_prefix"] == "unit-latent-audio"
+    assert graph["23"]["inputs"]["filename_prefix"] == "unit"
+    assert "LATENT ~/h3-output/unit-latent-video_00001_.latent" in result.stdout
+    assert "LATENT ~/h3-output/unit-latent-audio_00001_.latent" in result.stdout
+    assert result.stdout.strip().splitlines()[-1].startswith("OUTPUT ")
+
+
+def test_chain_continue_points_load_latent_at_previous_segment(tmp_path, mock_comfy):
+    mock_comfy.history_payload = _chain_history("unit")
+    workflow = tmp_path / "cont.json"
+    shutil.copy(CHAIN_CONTINUE, workflow)
+    result, _ = _run(["--prompt", "hello", "--continue-from", "story-s1"], workflow, tmp_path,
+                     mock_comfy.server_address[1])
+    assert result.returncode == 0, result.stderr
+    graph = mock_comfy.posted[-1]["prompt"]
+    assert _titled(graph, "prev_latent_video")["inputs"]["latent"] == "story-s1-latent-video_00001_.latent [output]"
+    assert _titled(graph, "prev_latent_audio")["inputs"]["latent"] == "story-s1-latent-audio_00001_.latent [output]"
+    assert _titled(graph, "save_latent_video")["inputs"]["filename_prefix"] == "unit-latent-video"
+
+
+def test_chain_continue_without_continue_from_fails_before_post(tmp_path, mock_comfy):
+    workflow = tmp_path / "cont.json"
+    shutil.copy(CHAIN_CONTINUE, workflow)
+    result, _ = _run(["--prompt", "hello"], workflow, tmp_path, mock_comfy.server_address[1])
+    assert result.returncode == 1
+    assert "--continue-from" in result.stderr
+    assert mock_comfy.posted == []
+
+
+def test_continue_from_on_a_single_clip_graph_fails_before_post(tmp_path, mock_comfy):
+    workflow = tmp_path / "maxq.json"
+    shutil.copy(REPO / "workflows" / "h3-ref2va-maxq-15s08-25step-1344.json", workflow)
+    result, _ = _run(["--prompt", "hello", "--continue-from", "story-s1"], workflow, tmp_path,
+                     mock_comfy.server_address[1])
+    assert result.returncode == 1
+    assert "prev_latent" in result.stderr
+    assert mock_comfy.posted == []
+
+
+def test_continue_from_rejects_paths(tmp_path, mock_comfy):
+    workflow = tmp_path / "cont.json"
+    shutil.copy(CHAIN_CONTINUE, workflow)
+    result, _ = _run(["--prompt", "hello", "--continue-from", "../etc/x"], workflow, tmp_path,
+                     mock_comfy.server_address[1])
+    assert result.returncode == 1
+    assert mock_comfy.posted == []

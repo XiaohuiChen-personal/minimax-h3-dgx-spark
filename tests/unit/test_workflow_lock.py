@@ -360,3 +360,26 @@ def test_sol_attn_keeps_sensitive_blocks_dense():
         assert sol[0]["dense_blocks"] == "0-2,-1", path.name
         assert sol[0]["tau"] == 1.3, path.name
         assert sol[0]["sink_conditioning"] == "exact_kv", path.name
+
+
+def test_maxq_chain_graphs_match_maxq_and_lock_39_frames():
+    """Chain graphs keep every max-quality knob; continue copies 12 slots + 65 ticks (39 frames)."""
+    maxq = prompt_graph(load("h3-ref2va-maxq-15s08-25step-1344.json"))
+    for name in ("h3-ref2va-maxq-chain-start-1344.json", "h3-ref2va-maxq-chain-continue-1344.json"):
+        g = prompt_graph(load(name))
+        for nid in ("1", "2", "3", "4", "6", "7", "8", "11", "12", "13", "14", "16", "17", "22"):
+            assert g[nid]["class_type"] == maxq[nid]["class_type"], (name, nid)
+            if nid not in ("15",):
+                assert g[nid]["inputs"] == maxq[nid]["inputs"], (name, nid)
+        assert g["10"]["inputs"]["length"] == ["50", 0], name
+        assert g["50"]["class_type"] == "PrimitiveInt" and g["50"]["inputs"]["value"] == 362, name
+        titles = {(n["class_type"], (n.get("_meta") or {}).get("title")) for n in g.values()}
+        assert ("SaveLatent", "save_latent_video") in titles and ("SaveLatent", "save_latent_audio") in titles
+        assert not any("LoraLoader" in n["class_type"] for n in g.values()), name
+    cont = prompt_graph(load("h3-ref2va-maxq-chain-continue-1344.json"))
+    assert cont["15"]["inputs"]["latent_image"] == ["71", 0]
+    assert cont["63"]["inputs"] == {"samples": ["60", 0], "dim": "t", "index": -12, "amount": 12}
+    assert cont["66"]["inputs"] == {"samples": ["61", 0], "dim": "x", "index": -65, "amount": 65}
+    assert cont["53"]["inputs"]["batch_size"] == 12 and cont["58"]["inputs"]["width"] == 65
+    # 39 frames = 12 latent slots (1+4+4+4+4 + 1+4+4+4+4 + 1+4) and 39 / 24 * 40 = 65 audio ticks.
+    assert sum((1, 4, 4, 4, 4)[k % 5] for k in range(12)) == 39 and 39 * 40 % 24 == 0
