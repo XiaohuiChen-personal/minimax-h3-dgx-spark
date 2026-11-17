@@ -85,7 +85,7 @@ Default generate is **Ref2VA**: identity stills via `--ref-image` (variable **1�
 | Ref2VA (default) | Host files with `--ref-image`, uploaded via `POST /upload/image` | 1-based `<Picture N>` in `--ref-image` order. 3-view sheets are **this** path, not `first_frame`. |
 | FL2VA (selectable) | Nothing for identity. Locked T2V graphs omit `first_frame` / `last_frame` | Do **not** write `<Picture N>` (empty theater). |
 
-Ref2VA graphs ship nine `LoadImage` titles `ref_image_0`…`ref_image_8`. Submit wires only the first N nested `ref_images` keys. Leftover `LoadImage` nodes stay unlinked `example.png` and are not in the SaveVideo DAG. **10+ fail-close.** Zero identity stills → submit FL2VA, not 0-ref Ref2VA.
+Ref2VA graphs ship nine `LoadImage` titles `ref_image_0`…`ref_image_8`. Submit wires only the first N, as dotted `ref_images.ref_image_N` keys (measured 2026-11-15: ComfyUI accepts a nested `ref_images` dict but the node receives no stills). Leftover `LoadImage` nodes stay unlinked `example.png` and are not in the SaveVideo DAG. **10+ fail-close.** Zero identity stills → submit FL2VA, not 0-ref Ref2VA.
 
 Locked Ref2VA lengths (D-15):
 

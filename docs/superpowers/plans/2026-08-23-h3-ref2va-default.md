@@ -29,7 +29,7 @@
 - Do not use FL2VA Turbo LoRA on the Ref2VA DiT. Do not use Ref2VA Turbo LoRA on the FL2VA DiT.
 - Official Comfy-Org R2V template is UI-format and **not** this product (INT8 Ref2VA + NVFP4 TE + 1344×768 + duration-math). Rebuild API-format graphs the way Task 7 of the FL2VA plan did.
 - Prompt tags for Ref2VA are `<Picture 1>`, `<Picture 2>`, … (1-based). Do not write those tags in FL2VA graphs.
-- Autogrow API encoding is a nested dict: `"ref_images": {"ref_image_0": ["24", 0], ...}`. Dotted keys also worked on this box; flattened `"ref_image_0"` **executes and crashes**. Lock the nested dict.
+- Autogrow API encoding is a nested dict: `"ref_images": {"ref_image_0": ["24", 0], ...}`. Dotted keys also worked on this box; flattened `"ref_image_0"` **executes and crashes**. Lock the nested dict. **Superseded 2026-11-15:** the nested dict executes, but the node receives no references (output bit-identical to a run without stills). Submit now writes dotted keys `"ref_images.ref_image_0": ["24", 0]`.
 - `LoadImage` reads `/opt/ComfyUI/input`, **not** `/data`. `submit-prompt.py` must `POST /upload/image` then set the LoadImage filename. Do not write host paths or `/data/...` into `LoadImage.image`.
 - Every new download appends `measurements/download-log.md` (same speed-log protocol as the FL2VA plan).
 - Each task’s last “Commit” step is **commit only**. Parent close-out pushes. Never `--force`. Never `--no-verify` unless the operator said so.
@@ -46,7 +46,7 @@ Do not redo these as a substitute for Task 8. They are why this plan is allowed.
 | HF sizes | Ref2VA FP8 DiT `20958205608` B; Ref2V 4-step LoRA `1956193000` B (Comfy-Org) |
 | Missing DiT fail-close | `POST` locked FL2VA graph with `unet_name=minimax_h3_ref2va_pruned_fp8_scaled.safetensors` → HTTP 400 `value_not_in_list` (combo is files on disk). Queue unchanged. |
 | Nested `ref_images` | Condition+VAE-decode smoke, **no UNET**, `example.png` as `<Picture 1>`, length 5 → HTTP 200, `execution_success` in ~7 s, 5 PNGs under `~/h3-output/ref2va-schema-B_nested_*.png` |
-| Dotted `ref_images.ref_image_0` | Also succeeded. Do not use it; lock nested. |
+| Dotted `ref_images.ref_image_0` | Also succeeded. Do not use it; lock nested. (2026-11-15: this is the only form that reaches the node; submit uses it now.) |
 | Flat `ref_image_0` | History **error**: `unexpected keyword argument 'ref_image_0'` |
 | `/upload/image` | `curl -F image=@...` → `{"name":"ref2va-upload-smoke.png","type":"input"}` in `/opt/ComfyUI/input` |
 | `/data` mount | Empty; `LoadImage` cannot see it |

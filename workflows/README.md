@@ -34,7 +34,7 @@ Start from Comfy-Org’s R2V template, then **rebuild** — do not ship it uncha
 
 Nodes the **Turbo** Ref2VA graphs must use:
 
-- `MiniMaxH3ReferenceToVideo` — prompt + `ref_image_size=match`. Do **not** commit a `ref_images` dict (submit writes the nested dict). No flat `ref_image_*` keys on this node
+- `MiniMaxH3ReferenceToVideo` — prompt + `ref_image_size=match`. Do **not** commit a `ref_images` dict (submit writes dotted `ref_images.ref_image_N` keys). No flat `ref_image_*` keys on this node
 - Nine `LoadImage` nodes titled `ref_image_0`…`ref_image_8`
 - D-15 DiT + Ref2V 4-step LoRA; D-02 TE / VAEs; D-04 SPAN
 - `ModelSamplingAV` — two clocks, shifts **12 / 3** (the Ref2V 4-step v0.1 LoRA was distilled at 12 / 3; see D-06)
