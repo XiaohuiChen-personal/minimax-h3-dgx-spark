@@ -91,7 +91,7 @@ Snap “15 s” / “15.04 s” to **15.08 s / 362** on the Turbo long file. Nev
 
 Default generate is **Ref2VA**. Identity stills — including 3-view sheets — are `--ref-image` host files, **not** `first_frame`.
 
-The agent uploads each still with `POST /upload/image`, then `submit-prompt.py` sets `LoadImage.image` to the uploaded name and writes a nested `ref_images` dict. Graphs ship nine titles `ref_image_0`…`ref_image_8`. **Variable 1–9.** Leftover `LoadImage` nodes stay unlinked `example.png` and are not in the SaveVideo DAG. **10+ fail-close.** Zero identity stills → submit an FL2VA graph, not 0-ref Ref2VA. Task 8/9 smokes still use six bird stills (N=6 of 9 slots).
+The agent uploads each still with `POST /upload/image`, then `submit-prompt.py` sets `LoadImage.image` to the uploaded name and writes dotted `ref_images.ref_image_N` keys. (Measured 2026-11-15: a nested `ref_images` dict is accepted, but the node receives no stills.) Graphs ship nine titles `ref_image_0`…`ref_image_8`. **Variable 1–9.** Leftover `LoadImage` nodes stay unlinked `example.png` and are not in the SaveVideo DAG. **10+ fail-close.** Zero identity stills → submit an FL2VA graph, not 0-ref Ref2VA. Task 8/9 smokes still use six bird stills (N=6 of 9 slots).
 
 | What the agent does | What the node does | Result |
 |---|---|---|
