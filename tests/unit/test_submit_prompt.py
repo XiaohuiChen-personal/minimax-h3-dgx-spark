@@ -603,10 +603,10 @@ def test_ref_images_upload_and_nested_wiring(tmp_path, mock_comfy):
     graph = mock_comfy.posted[0]["prompt"]
     assert graph["24"]["inputs"]["image"] == "blue.png"
     assert graph["25"]["inputs"]["image"] == "yellow.png"
-    assert graph["10"]["inputs"]["ref_images"] == {
-        "ref_image_0": ["24", 0],
-        "ref_image_1": ["25", 0],
-    }
+    # Dotted autogrow keys: ComfyUI silently ignores a nested "ref_images" dict (measured 2026-11-15).
+    assert graph["10"]["inputs"]["ref_images.ref_image_0"] == ["24", 0]
+    assert graph["10"]["inputs"]["ref_images.ref_image_1"] == ["25", 0]
+    assert "ref_images" not in graph["10"]["inputs"]
     assert "ref_image_0" not in graph["10"]["inputs"]
     assert mock_comfy.uploads == ["blue.png", "yellow.png"]
     assert mock_comfy.upload_fields == ["image", "image"]
@@ -917,10 +917,9 @@ def test_ref_image_deletes_flat_keys_keeps_ref_image_size(tmp_path, mock_comfy):
     assert inputs["ref_image_size"] == "match"
     assert "ref_image_0" not in inputs
     assert "ref_image_1" not in inputs
-    assert inputs["ref_images"] == {
-        "ref_image_0": ["24", 0],
-        "ref_image_1": ["25", 0],
-    }
+    assert inputs["ref_images.ref_image_0"] == ["24", 0]
+    assert inputs["ref_images.ref_image_1"] == ["25", 0]
+    assert "ref_images" not in inputs
     assert str(tmp_path / "blue.png") not in json.dumps(graph)
     assert "/data/" not in graph["24"]["inputs"]["image"]
     assert "/data/" not in graph["25"]["inputs"]["image"]
@@ -1005,3 +1004,133 @@ def test_continue_from_rejects_paths(tmp_path, mock_comfy):
                      mock_comfy.server_address[1])
     assert result.returncode == 1
     assert mock_comfy.posted == []
+
+
+# --- --ref-audio (standalone reference audio, e.g. voice timbre; Ref2VA only) ---
+
+
+def _ref2va_audio_workflow(tmp_path: Path, n_loaders: int = 3) -> Path:
+    data = json.loads(
+        (REPO / "tests/fixtures/tiny-ref2va-workflow.json").read_text(encoding="utf-8")
+    )
+    for index in range(n_loaders):
+        data[str(40 + index)] = {
+            "class_type": "LoadAudio",
+            "_meta": {"title": f"ref_audio_{index}"},
+            "inputs": {"audio": "placeholder.wav"},
+        }
+    workflow = tmp_path / "ref2va-audio.json"
+    workflow.write_text(json.dumps(data), encoding="utf-8")
+    return workflow
+
+
+def test_ref_audio_upload_and_dotted_wiring(tmp_path, mock_comfy):
+    workflow = _ref2va_audio_workflow(tmp_path)
+    img = tmp_path / "bear.png"
+    img.write_bytes(b"x")
+    voice0 = tmp_path / "yier-voice.wav"
+    voice1 = tmp_path / "bubu-voice.wav"
+    voice0.write_bytes(b"RIFF0")
+    voice1.write_bytes(b"RIFF1")
+    result, _ = _run(
+        ["--prompt", "<Picture 1> bear. <Audio 1> and <Audio 2> are voice references.",
+         "--ref-image", str(img), "--ref-audio", str(voice0), "--ref-audio", str(voice1)],
+        workflow, tmp_path, mock_comfy.server_address[1],
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    graph = mock_comfy.posted[0]["prompt"]
+    assert graph["40"]["inputs"]["audio"] == "yier-voice.wav"
+    assert graph["41"]["inputs"]["audio"] == "bubu-voice.wav"
+    assert graph["10"]["inputs"]["ref_audios.ref_audio_0"] == ["40", 0]
+    assert graph["10"]["inputs"]["ref_audios.ref_audio_1"] == ["41", 0]
+    assert "ref_audios" not in graph["10"]["inputs"]
+    assert "42" not in graph  # third loader had no file: dropped, not left as a placeholder
+    assert mock_comfy.uploads == ["bear.png", "yier-voice.wav", "bubu-voice.wav"]
+    assert mock_comfy.upload_fields == ["image", "image", "image"]
+
+
+def test_ref_audio_loaders_dropped_without_flag(tmp_path, mock_comfy):
+    workflow = _ref2va_audio_workflow(tmp_path)
+    result, _ = _run(["--prompt", "a bear"], workflow, tmp_path, mock_comfy.server_address[1])
+    assert result.returncode == 0, result.stderr + result.stdout
+    graph = mock_comfy.posted[0]["prompt"]
+    assert not [n for n in graph.values() if n.get("class_type") == "LoadAudio"]
+    assert not [k for k in graph["10"]["inputs"] if k.startswith("ref_audios")]
+
+
+def test_audio_tag_beyond_ref_audio_count_fails_before_upload(tmp_path, mock_comfy):
+    workflow = _ref2va_audio_workflow(tmp_path)
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"RIFF")
+    result, _ = _run(
+        ["--prompt", "<Audio 1> one. <Audio 2> two.", "--ref-audio", str(voice)],
+        workflow, tmp_path, mock_comfy.server_address[1],
+    )
+    assert result.returncode == 1
+    assert "<Audio 2>" in result.stderr
+    assert mock_comfy.uploads == []
+    assert mock_comfy.posted == []
+
+
+def test_ref_audio_without_loadaudio_nodes_fails_before_any_upload(tmp_path, mock_comfy):
+    workflow = _ref2va_audio_workflow(tmp_path, n_loaders=0)
+    img = tmp_path / "bear.png"
+    img.write_bytes(b"x")
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"RIFF")
+    result, _ = _run(
+        ["--prompt", "<Audio 1> voice.", "--ref-image", str(img), "--ref-audio", str(voice)],
+        workflow, tmp_path, mock_comfy.server_address[1],
+    )
+    assert result.returncode == 1
+    assert "LoadAudio" in result.stderr
+    assert mock_comfy.uploads == []  # the still was not uploaded either
+    assert mock_comfy.posted == []
+
+
+def test_ref_audio_rejects_more_than_three(tmp_path, mock_comfy):
+    workflow = _ref2va_audio_workflow(tmp_path, n_loaders=4)
+    voices = []
+    for index in range(4):
+        voice = tmp_path / f"v{index}.wav"
+        voice.write_bytes(b"RIFF")
+        voices += ["--ref-audio", str(voice)]
+    result, _ = _run(["--prompt", "voices", *voices], workflow, tmp_path,
+                     mock_comfy.server_address[1])
+    assert result.returncode == 1
+    assert "at most 3" in result.stderr
+    assert mock_comfy.uploads == []
+    assert mock_comfy.posted == []
+
+
+def test_ref_audio_on_fl2va_fails(tmp_path, mock_comfy):
+    voice = tmp_path / "voice.wav"
+    voice.write_bytes(b"RIFF")
+    result, _ = _run(
+        ["--prompt", "a bear talks", "--ref-audio", str(voice)],
+        _keyframe_workflow(tmp_path), tmp_path, mock_comfy.server_address[1],
+    )
+    assert result.returncode == 1
+    assert "Ref2VA-only" in result.stderr
+    assert mock_comfy.uploads == []
+    assert mock_comfy.posted == []
+
+
+def test_ref_image_replaces_stale_nested_and_dotted_keys(tmp_path, mock_comfy):
+    """A graph that already carries a nested dict or extra dotted keys ends with exactly the new links."""
+    data = json.loads(
+        (REPO / "tests/fixtures/tiny-ref2va-workflow.json").read_text(encoding="utf-8")
+    )
+    data["10"]["inputs"]["ref_images"] = {"ref_image_0": ["24", 0]}
+    data["10"]["inputs"]["ref_images.ref_image_1"] = ["25", 0]
+    workflow = tmp_path / "stale.json"
+    workflow.write_text(json.dumps(data), encoding="utf-8")
+    img = tmp_path / "bear.png"
+    img.write_bytes(b"x")
+    result, _ = _run(["--prompt", "<Picture 1> bear.", "--ref-image", str(img)],
+                     workflow, tmp_path, mock_comfy.server_address[1])
+    assert result.returncode == 0, result.stderr + result.stdout
+    inputs = mock_comfy.posted[0]["prompt"]["10"]["inputs"]
+    assert {k: v for k, v in inputs.items() if k.startswith("ref_images")} == {
+        "ref_images.ref_image_0": ["24", 0]
+    }

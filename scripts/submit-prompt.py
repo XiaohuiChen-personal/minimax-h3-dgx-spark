@@ -8,7 +8,13 @@ Patched node input names (scalars only; ComfyUI links like ["4", 0] are skipped)
   filename_prefix      <- --name
   LoadImage.image      <- --ref-image / --first-frame / --last-frame
                           (uploaded via POST /upload/image; never a host path)
-  MiniMaxH3ReferenceToVideo.ref_images      <- nested dict from --ref-image
+  MiniMaxH3ReferenceToVideo "ref_images.ref_image_N" <- dotted autogrow keys from --ref-image
+                          (a nested "ref_images" dict is silently ignored by ComfyUI)
+  LoadAudio.audio      <- --ref-audio (LoadAudio titled ref_audio_N; uploaded via
+                          POST /upload/image like the stills)
+  MiniMaxH3ReferenceToVideo "ref_audios.ref_audio_N" <- dotted autogrow keys from --ref-audio
+                          (prompt label <Audio N>, 1-based in --ref-audio order;
+                          LoadAudio nodes left without a file are dropped)
   MiniMaxH3ImageToVideo.first_frame / last_frame
                        <- link to the LoadImage titled first_frame / last_frame
   SaveLatent titled save_latent_<stream>
@@ -53,6 +59,11 @@ REF_IMAGE_TITLE_RE = re.compile(r"^ref_image_(\d+)$")
 FLAT_REF_IMAGE_KEY_RE = re.compile(r"^ref_image_\d+$")
 # The H3 tokenizer prefixes each attached still with "<Picture N>: " (1-based).
 PICTURE_TAG_RE = re.compile(r"<Picture\s+(\d+)>")
+# Standalone reference audio (voice timbre etc.): node max 3, labelled <Audio N>.
+MAX_REF_AUDIOS = 3
+REF_AUDIO_TITLE_RE = re.compile(r"^ref_audio_(\d+)$")
+FLAT_REF_AUDIO_KEY_RE = re.compile(r"^ref_audio_\d+$")
+AUDIO_TAG_RE = re.compile(r"<Audio\s+(\d+)>")
 # Chain graphs (workflows/h3-ref2va-maxq-chain-*.json): a segment saves its sampled
 # video/audio latents; the next segment loads them from the server's output folder.
 SAVE_LATENT_TITLE_RE = re.compile(r"^save_latent_([a-z]+)$")
@@ -93,24 +104,36 @@ def _patch_existing_scalars(graph: dict[str, Any], keys: Iterable[str], value: A
     return patched
 
 
-def load_image_nodes_by_title(graph: dict[str, Any]) -> list[tuple[str, dict]]:
-    """Return LoadImage nodes titled ref_image_N, sorted by the integer suffix."""
+def _loaders_by_title(
+    graph: dict[str, Any], class_type: str, title_re: re.Pattern
+) -> list[tuple[str, dict]]:
+    """Return class_type nodes whose title matches title_re, sorted by the integer suffix."""
     found: list[tuple[int, str, dict]] = []
     for node_id, node in graph.items():
         if not isinstance(node, dict):
             continue
-        if node.get("class_type") != "LoadImage":
+        if node.get("class_type") != class_type:
             continue
         meta = node.get("_meta")
         title = meta.get("title") if isinstance(meta, dict) else None
         if not isinstance(title, str):
             continue
-        match = REF_IMAGE_TITLE_RE.fullmatch(title)
+        match = title_re.fullmatch(title)
         if not match:
             continue
         found.append((int(match.group(1)), str(node_id), node))
     found.sort(key=lambda item: item[0])
     return [(node_id, node) for _suffix, node_id, node in found]
+
+
+def load_image_nodes_by_title(graph: dict[str, Any]) -> list[tuple[str, dict]]:
+    """Return LoadImage nodes titled ref_image_N, sorted by the integer suffix."""
+    return _loaders_by_title(graph, "LoadImage", REF_IMAGE_TITLE_RE)
+
+
+def load_audio_nodes_by_title(graph: dict[str, Any]) -> list[tuple[str, dict]]:
+    """Return LoadAudio nodes titled ref_audio_N, sorted by the integer suffix."""
+    return _loaders_by_title(graph, "LoadAudio", REF_AUDIO_TITLE_RE)
 
 
 def _nodes_of_class(graph: dict[str, Any], class_type: str) -> list[tuple[str, dict]]:
@@ -192,8 +215,27 @@ def upload_input_image(base_url: str, host_path: str, flag: str = "--ref-image")
     return str(name)
 
 
+def _write_autogrow(
+    inputs: dict[str, Any], group: str, links: dict[str, list[Any]], flat_key_re: re.Pattern
+) -> None:
+    """Write autogrow links as dotted keys "<group>.<name>", the form ComfyUI's V3 Autogrow reads.
+
+    Measured on the Spark (2026-11-15, pinned ComfyUI): a nested dict {"ref_images": {...}} is
+    accepted and the job succeeds, but the node receives no references. Output was bit-identical
+    to a run with no stills at all. Dotted keys reach the node (stills and audio both changed the
+    output). Old nested / flat / dotted keys for this group are cleared first.
+    """
+    prefix = f"{group}."
+    for key in list(inputs):
+        k = str(key)
+        if k == group or k.startswith(prefix) or flat_key_re.fullmatch(k):
+            del inputs[key]
+    for name, link in links.items():
+        inputs[f"{prefix}{name}"] = link
+
+
 def wire_ref_images(graph: dict[str, Any], base_url: str, host_paths: list[str]) -> None:
-    """Upload stills, patch LoadImage filenames, write nested ref_images. Fail-close."""
+    """Upload stills, patch LoadImage filenames, write dotted ref_images keys. Fail-close."""
     if len(host_paths) > MAX_REF_IMAGES:
         print(f"error: --ref-image accepts at most {MAX_REF_IMAGES} paths", file=sys.stderr)
         raise SystemExit(1)
@@ -222,7 +264,7 @@ def wire_ref_images(graph: dict[str, Any], base_url: str, host_paths: list[str])
             file=sys.stderr,
         )
         raise SystemExit(1)
-    nested: dict[str, list[Any]] = {}
+    links: dict[str, list[Any]] = {}
     for index, host_path in enumerate(host_paths):
         load_id, load_node = load_nodes[index]
         uploaded_name = upload_input_image(base_url, host_path)
@@ -234,11 +276,84 @@ def wire_ref_images(graph: dict[str, Any], base_url: str, host_paths: list[str])
             )
             raise SystemExit(1)
         load_inputs["image"] = uploaded_name
-        nested[f"ref_image_{index}"] = [load_id, 0]
-    for key in list(inputs):
-        if FLAT_REF_IMAGE_KEY_RE.fullmatch(str(key)):
-            del inputs[key]
-    inputs["ref_images"] = nested
+        links[f"ref_image_{index}"] = [load_id, 0]
+    _write_autogrow(inputs, "ref_images", links, FLAT_REF_IMAGE_KEY_RE)
+
+
+def ref_audio_targets(graph: dict[str, Any], n_paths: int) -> tuple[dict, list[tuple[str, dict]]]:
+    """Check the graph can take n_paths reference audios; return (Ref2VA inputs, LoadAudio nodes).
+
+    Runs before any upload, so a graph that cannot take the audio fails without side effects.
+    """
+    if n_paths > MAX_REF_AUDIOS:
+        print(f"error: --ref-audio accepts at most {MAX_REF_AUDIOS} paths", file=sys.stderr)
+        raise SystemExit(1)
+    ref2va_nodes = _ref2va_nodes(graph)
+    if len(ref2va_nodes) != 1:
+        print(
+            "error: --ref-audio set but the graph does not have exactly one "
+            f"{REF2VA_CLASS} node (reference audio is Ref2VA-only)",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    load_nodes = load_audio_nodes_by_title(graph)
+    if len(load_nodes) < n_paths:
+        print(
+            "error: --ref-audio set but the graph does not have enough "
+            f"LoadAudio nodes titled ref_audio_* (need {n_paths}, "
+            f"found {len(load_nodes)})",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    _node_id, ref_node = ref2va_nodes[0]
+    inputs = ref_node.get("inputs")
+    if not isinstance(inputs, dict):
+        print(
+            f"error: --ref-audio set but {REF2VA_CLASS} inputs are invalid",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    for load_id, load_node in load_nodes[:n_paths]:
+        if not isinstance(load_node.setdefault("inputs", {}), dict):
+            print(
+                f"error: --ref-audio LoadAudio node {load_id} has invalid inputs",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+    return inputs, load_nodes
+
+
+def wire_ref_audios(graph: dict[str, Any], base_url: str, host_paths: list[str]) -> None:
+    """Upload reference audio, patch LoadAudio filenames, write dotted ref_audios keys. Fail-close."""
+    inputs, load_nodes = ref_audio_targets(graph, len(host_paths))
+    links: dict[str, list[Any]] = {}
+    for index, host_path in enumerate(host_paths):
+        load_id, load_node = load_nodes[index]
+        load_node["inputs"]["audio"] = upload_input_image(base_url, host_path, flag="--ref-audio")
+        links[f"ref_audio_{index}"] = [load_id, 0]
+    _write_autogrow(inputs, "ref_audios", links, FLAT_REF_AUDIO_KEY_RE)
+
+
+def _links_to(graph: dict[str, Any], node_id: str) -> bool:
+    """True if any node input (also inside nested dicts such as ref_audios) links to node_id."""
+
+    def walk(value: Any) -> bool:
+        if _is_link(value):
+            return len(value) >= 1 and str(value[0]) == node_id
+        if isinstance(value, dict):
+            return any(walk(v) for v in value.values())
+        return False
+
+    return any(
+        walk(node.get("inputs", {})) for node in graph.values() if isinstance(node, dict)
+    )
+
+
+def drop_unwired_ref_audio_loaders(graph: dict[str, Any]) -> None:
+    """Remove LoadAudio ref_audio_* nodes that nothing links to (no placeholder file to validate)."""
+    for node_id, _node in load_audio_nodes_by_title(graph):
+        if not _links_to(graph, node_id):
+            del graph[node_id]
 
 
 def wire_keyframe(graph: dict[str, Any], base_url: str, key: str, host_path: str) -> None:
@@ -377,6 +492,18 @@ def check_picture_tags(prompt: str, graph: dict[str, Any], n_refs: int, n_keyfra
     return (
         f"error: prompt names <Picture {bad[0]}> but only {available} {what} "
         f"image(s) are attached; <Picture N> is 1-based in attach order"
+    )
+
+
+def check_audio_tags(prompt: str, n_audios: int) -> str | None:
+    """Return an error if the prompt names an <Audio N> that no --ref-audio file backs."""
+    tags = sorted({int(m) for m in AUDIO_TAG_RE.findall(prompt)})
+    bad = [n for n in tags if n < 1 or n > n_audios]
+    if not bad:
+        return None
+    return (
+        f"error: prompt names <Audio {bad[0]}> but only {n_audios} --ref-audio "
+        f"file(s) are attached; <Audio N> is 1-based in --ref-audio order"
     )
 
 
@@ -558,6 +685,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Local identity still; repeatable (max 9). Uploaded via POST /upload/image.",
     )
     parser.add_argument(
+        "--ref-audio",
+        action="append",
+        default=None,
+        help="Local reference audio (e.g. a voice-timbre clip), labelled <Audio N> in order; "
+        "repeatable (max 3). Ref2VA graphs with LoadAudio nodes titled ref_audio_N only. "
+        "Uploaded via POST /upload/image.",
+    )
+    parser.add_argument(
         "--continue-from",
         default=None,
         help="Chain-continue graphs only: the --name of the previous segment, whose saved "
@@ -607,6 +742,12 @@ def main(argv: list[str] | None = None) -> int:
     if error:
         print(error, file=sys.stderr)
         return 1
+    error = check_audio_tags(prompt, len(args.ref_audio or []))
+    if error:
+        print(error, file=sys.stderr)
+        return 1
+    if args.ref_audio:
+        ref_audio_targets(graph, len(args.ref_audio))  # fail before any upload
 
     _patch_existing_scalars(graph, PROMPT_KEYS, prompt)
     patched_seed = _patch_existing_scalars(graph, SEED_KEYS, args.seed)
@@ -630,6 +771,9 @@ def main(argv: list[str] | None = None) -> int:
         wire_keyframe(graph, base, "last_frame", args.last_frame)
     if args.ref_image:
         wire_ref_images(graph, base, args.ref_image)
+    if args.ref_audio:
+        wire_ref_audios(graph, base, args.ref_audio)
+    drop_unwired_ref_audio_loaders(graph)
 
     status, raw, parsed = http_json("POST", f"{base}/prompt", {"prompt": graph})
     if status != 200 or not isinstance(parsed, dict):
