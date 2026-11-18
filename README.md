@@ -89,7 +89,7 @@ design/*.md  ──already locked──►  docs/design/*.html
 ```
 
 1. Do **not** invent a different serving stack. ComfyUI on 8188 stays the generate server. Default graphs are a reference — copy, modify, or add a graph when the use case needs it.
-2. Start from the graphs in [`workflows/README.md`](workflows/README.md) and the scripts in [`scripts/README.md`](scripts/README.md). Default generate is `workflows/h3-ref2va-default-8s.json`. ~15 s uses `workflows/h3-ref2va-long-15s08.json` (**15.08 s / 362**). Quality / no-Turbo 15 s uses `workflows/h3-ref2va-quality-15s08-20step-1344.json`. Max quality (25 steps, ~85 min) uses `workflows/h3-ref2va-maxq-15s08-25step-1344.json`. Text-only / no identity images uses the FL2VA pair. Another graph is allowed.
+2. Start from the graphs in [`workflows/README.md`](workflows/README.md) and the scripts in [`scripts/README.md`](scripts/README.md). Default generate is `workflows/h3-ref2va-default-8s.json`. ~15 s uses `workflows/h3-ref2va-long-15s08.json` (**15.08 s / 362**). Quality / no-Turbo 15 s uses `workflows/h3-ref2va-quality-15s08-20step-1344.json`. Max quality (25 steps, ~2 h 10 min with six stills) uses `workflows/h3-ref2va-maxq-15s08-25step-1344.json`. Claude Code's default full video path is `workflows/h3-ref2va-fast-15s08-672-span2x.json` (the same settings at 672×384 + SPAN 2× + mild sharpen, ~13 min; skill `.claude/skills/h3-make-video-fast/`). Text-only / no identity images uses the FL2VA pair. Another graph is allowed.
 
 | User ask | File | Length |
 |---|---|---|
@@ -97,7 +97,8 @@ design/*.md  ──already locked──►  docs/design/*.html
 | Fast smoke / “about 5 seconds” | `workflows/h3-ref2va-smoke-5s17.json` | **5.17 s / 124** |
 | “15 seconds” / “15.04 s” / “about 15 seconds” | `workflows/h3-ref2va-long-15s08.json` | **15.08 s / 362** |
 | Quality / no Turbo / 20-step 15 s | `workflows/h3-ref2va-quality-15s08-20step-1344.json` | **15.08 s / 362** |
-| Max quality / 25-step 15 s (~85 min) | `workflows/h3-ref2va-maxq-15s08-25step-1344.json` | **15.08 s / 362** |
+| Max quality / 25-step 15 s (~2 h 10 min with six stills) | `workflows/h3-ref2va-maxq-15s08-25step-1344.json` | **15.08 s / 362** |
+| Fast max quality (Claude Code default, ~13 min) | `workflows/h3-ref2va-fast-15s08-672-span2x.json` | **15.08 s / 362** |
 | Text-only / no identity images, about 8 seconds | `workflows/h3-fl2va-default-8s.json` | **8.00 s / 192** |
 | Text-only fast smoke | `workflows/h3-fl2va-smoke-5s17.json` | **5.17 s / 124** |
 | Start from / end on a still (I2VA / FL2VA / L2VA) | `workflows/h3-fl2va-keyframes-8s.json` | **8.00 s / 192** |

@@ -1,9 +1,11 @@
 ---
 name: h3-make-video
-description: Make a video with MiniMax H3 on the DGX Spark at the highest quality this repo has (the 25-step, no-Turbo Ref2VA graph, ~85 min for 15 s), end to end. Plan and write H3's structured prompt, have a fresh reviewer attack it and fix what it finds, generate, report progress every 10 minutes, review every frame (camera motion vs subject motion included), report the findings, and put the mp4 in the MacBook's ~/Downloads. Use it whenever the user asks to make, generate, render or shoot a video, clip, short or animation (生成视频, 做个视频, 出片, 拍一段), especially with character reference images or three-view sheets, even if they never say "H3", "ComfyUI" or "highest quality", and also to review an existing H3 mp4 frame by frame. Not for requests that ask for speed (quick test, smoke test, draft, Turbo, "just check the server") or name a specific graph; those follow AGENTS.md.
+description: The slow, highest-quality way to make a video with MiniMax H3 on the DGX Spark (the 25-step, no-Turbo Ref2VA graph at native 1344x768 / 768x1344, about 2 h 10 min for 15 s with six stills), end to end. Plan and write H3's structured prompt, have a fresh reviewer attack it and fix what it finds, generate, report progress every 10 minutes, review every frame (camera motion vs subject motion included), report the findings, and put the mp4 in the MacBook's ~/Downloads. Use it ONLY when the user explicitly asks for the slow or native version (质量高且慢的版本、慢的版本、原生分辨率, "the slow version", "native resolution"; 高质量 or "best" alone is not enough), or to review an existing H3 mp4 frame by frame. Every other make-a-video request goes to h3-make-video-fast, the operator's default since 2026-11-17. Not for requests that ask for Turbo, a smoke test or a draft, or name a specific graph; those follow AGENTS.md.
 ---
 
 # Make a video with H3, highest quality
+
+**Since 2026-11-17 this is the slow path.** The default for full video requests is `.claude/skills/h3-make-video-fast/`: the same settings on a quarter canvas plus SPAN 2x and a mild sharpen, about 13 min instead of about 2 h 10 min. On 一二布布 the operator preferred it to the native render (SPAN of a downscaled native frame vs native: SSIM 0.981; no same-prompt A/B yet). Use this skill when the user asks for the high-quality slow version. The fast skill reuses Steps 0–8 below, so keep them general.
 
 This skill is the long form of AGENTS.md → **Generate a video**, and every rule there still holds. The main ones:
 
@@ -13,7 +15,7 @@ This skill is the long form of AGENTS.md → **Generate a video**, and every rul
 - legal lengths only;
 - one prompt, with no negative prompt and no CFG.
 
-The operator made this skill so that full video requests get the max-quality graph by default; AGENTS.md points here for that reason. When the user asks for speed (a test, a draft, "quick", Turbo) or names a graph, follow AGENTS.md instead.
+When the user asks for Turbo, a test, a draft, or names a graph, follow AGENTS.md instead.
 
 **Composing with other skills.**
 
@@ -40,7 +42,7 @@ Tell the user the time budget, in their language, before you start:
 | Phase | Time |
 |---|---|
 | Prompt, adversarial review, fixes | ~15–25 min |
-| Generation, 15.08 s with six ~1.5k px stills on this GB10 | ~85 min |
+| Generation, 15.08 s with six ~1.5k px stills on this GB10 | ~2 h 10 min (310 s/step, measured 2026-11-17) |
 | Every-frame review and report | ~20 min |
 
 ## The pipeline, and when it does not apply
@@ -54,7 +56,7 @@ Tell the user the time budget, in their language, before you start:
 - **References:** `ref_image_size=max`, so stills keep their own resolution up to a 2048 px short edge and are never upscaled.
 - **No** FBC, EasyCache, or SPAN.
 
-Measured: 196.85 s/step, 85.4 min end to end, with six stills. The 25 steps and the `beta` scheduler follow Comfy's R2V guidance; they were not A/B-tested here against 20 steps.
+Measured: 310 s/step, 2 h 12 min end to end, with six ~1.5k px stills at `max` (《布布的天鹅湖》, 2026-11-17). The older 196.85 s/step / 85.4 min figure was measured before 2026-11-15, when submit sent the stills in a nested dict that ComfyUI silently ignored, so that run had no reference tokens. The 25 steps and the `beta` scheduler follow Comfy's R2V guidance; they were not A/B-tested here against 20 steps.
 
 Never edit the shipped JSON. When something must change, copy it to `WORK/graph.json` and edit the copy:
 
@@ -67,9 +69,9 @@ Tell the user when you use an untested variant. The clip length in seconds is `l
 
 **When this pipeline does not fit**, tell the user and route as follows:
 
-- **No identity stills.** This graph needs 1–9. AGENTS.md routes 0 stills to FL2VA. The only tested FL2VA path is the 8-step Turbo graph `workflows/h3-fl2va-default-8s.json`: good, but not this quality. Offer it, or ask the user for reference images. Do not quietly build an untested no-Turbo FL2VA graph. On the FL2VA path, the three-field prompt from `design/prompting.md` applies. The linter handles it, and the watcher works the same way, but expect about 5 min, not 85.
+- **No identity stills.** This graph needs 1–9. AGENTS.md routes 0 stills to FL2VA. The only tested FL2VA path is the 8-step Turbo graph `workflows/h3-fl2va-default-8s.json`: good, but not this quality. Offer it, or ask the user for reference images. Do not quietly build an untested no-Turbo FL2VA graph. On the FL2VA path, the three-field prompt from `design/prompting.md` applies. The linter handles it, and the watcher works the same way, but expect about 5 min, not two hours.
 - **The picture is a frame of the shot, not an identity reference.** "Animate this picture", "start or end on this image" are keyframe tasks on `workflows/h3-fl2va-keyframes-8s.json` (8-step Turbo; AGENTS.md §4). Identity stills and keyframes are different graphs. Say it is not the max-quality path.
-- **Longer than 15.08 s.** H3 tops out at 15.08 s per clip. Offer several clips that share the same subject definitions and style sentence, each a separate ~85-minute run, cut together afterwards. For one continuous take without cuts, chain the clips instead; see **Continuous video across several clips** below.
+- **Longer than 15.08 s.** H3 tops out at 15.08 s per clip. Offer several clips that share the same subject definitions and style sentence, each a separate ~2-hour run, cut together afterwards. For one continuous take without cuts, chain the clips instead; see **Continuous video across several clips** below.
 - **Dialogue.** Speech has not been measured on this graph. Ref2VA Turbo is weak for speech (D-06). This graph has no Turbo, which should help. Tell the user it is unverified, and follow the speech rules in `references/prompt-guide.md` §10.
 
 **Reference-token budget.** Each still costs `(w/32) × (h/32)` tokens after scaling down to at most a 2048 px short edge, in **every** step. The video itself is 107,856 tokens at 1344×768×362.
@@ -80,7 +82,7 @@ Tell the user when you use an untested variant. The clip length in seconds is `l
 | One 2048×2730 still | 5,440 |
 | Nine 2048×2730 stills | ~49,000 |
 
-At nine large stills, the total of ~157k tokens sits near the ~160k region where some FP8 attention kernels have produced pure noise (`design/optimizations.md`). Keep the reference total around 30k or less: crop tight to the character, and use about 1.5k px short edges or fewer stills. The time cost per still is moderate (a 4000 px photo versus a 1500 px crop adds ~2–3k tokens, a few percent), but tight crops also keep backgrounds and props out of the identity. The ~85 min figure applies to six ~1.5k px stills.
+At nine large stills, the total of ~157k tokens sits near the ~160k region where some FP8 attention kernels have produced pure noise (`design/optimizations.md`). Keep the reference total around 30k or less: crop tight to the character, and use about 1.5k px short edges or fewer stills. The time cost per still is moderate (a 4000 px photo versus a 1500 px crop adds ~2–3k tokens, a few percent), but tight crops also keep backgrounds and props out of the identity. The ~2 h 10 min figure applies to six ~1.5k px stills.
 
 ## Step 0: Preflight
 
@@ -94,7 +96,7 @@ At nine large stills, the total of ~157k tokens sits near the ~160k region where
    ssh spark-2a60 'nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader; echo ---; docker top deploy-comfyui-1 -eo pid,comm 2>/dev/null | head -5; echo ---; free -g | sed -n 2p'
    curl -fsS http://spark-2a60:8188/queue
    ```
-   Compare the GPU PIDs with `docker top`: ComfyUI's PIDs are fine, any other PID is another project. If there is another GPU process, or a job already running or queued, tell the user what you saw and ask whether to wait or go ahead. An 85-minute job that shares the GPU can run out of memory or take much longer. Never stop someone else's process.
+   Compare the GPU PIDs with `docker top`: ComfyUI's PIDs are fine, any other PID is another project. If there is another GPU process, or a job already running or queued, tell the user what you saw and ask whether to wait or go ahead. A two-hour job that shares the GPU can run out of memory or take much longer. Never stop someone else's process.
 
 ## Step 1: Inputs
 
@@ -173,9 +175,9 @@ Each time it exits:
 - **`unreachable`:** a Tailscale blip is common. Relaunch once or twice before you escalate.
 - **`error`, or `missing` after the first window:** stop. Show the user the line and `ssh spark-2a60 'docker logs --tail 60 deploy-comfyui-1'`. Do not resubmit or restart anything without asking.
 
-On this graph, expect about 197 s/step, so a window sees about three steps. Model loading and text encoding at the start, and decoding at the end, produce no step events. More than 20 minutes mid-run with no step at all means it may be stuck: check the logs and tell the user.
+On this graph, expect about 310 s/step with six stills, so a window sees about two steps. Model loading and text encoding at the start, and decoding at the end, produce no step events. More than 20 minutes mid-run with no step at all means it may be stuck: check the logs and tell the user.
 
-**If the submit task exits non-zero while the watcher says `running`:** its connection dropped, but the job lives on the Spark. **Never resubmit**, because that queues a duplicate 85-minute job. Keep watching. When the watcher says `done`, fetch the file (Step 6) and continue.
+**If the submit task exits non-zero while the watcher says `running`:** its connection dropped, but the job lives on the Spark. **Never resubmit**, because that queues a duplicate two-hour job. Keep watching. When the watcher says `done`, fetch the file (Step 6) and continue.
 
 ## Step 6: Put the mp4 in the MacBook's ~/Downloads
 
@@ -218,7 +220,7 @@ Write the report in the user's language with the template in `frame-review.md`:
 - what to change if rerun;
 - file locations.
 
-Then ask whether to revise. Do not start another 85-minute run unless the user asks, or asked up front for automatic revisions (then follow their count). Each revision repeats Steps 2–8, with a fresh review and a new `--name`.
+Then ask whether to revise. Do not start another two-hour run unless the user asks, or asked up front for automatic revisions (then follow their count). Each revision repeats Steps 2–8, with a fresh review and a new `--name`.
 
 ## Continuous video across several clips (Masked AV chain)
 

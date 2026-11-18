@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mechanical checks for an H3 prompt file before anyone spends 85 minutes on it.
+"""Mechanical checks for an H3 prompt file before anyone spends a GPU run on it.
 
 Catches format slips: section order, shot markers and timestamps, labels, <d> blocks, word count,
 keyframe alignment marks, quoted text that H3 may draw on screen. It does not judge whether the prompt

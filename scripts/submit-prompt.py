@@ -23,6 +23,11 @@ Patched node input names (scalars only; ComfyUI links like ["4", 0] are skipped)
                        <- "<prev>-latent-<stream>_00001_.latent [output]" from
                           --continue-from <prev> (chain-continue graph; the file is
                           already in the server's output folder, nothing is uploaded)
+  LoadAudio titled soundtrack
+                       <- --soundtrack (locked-audio graphs: the whole audio track is
+                          fixed and H3 only draws the picture). Checked before any
+                          upload: PCM WAV, 32 kHz, stereo, exactly
+                          round(length / 24 * 40) * 800 samples for the graph's length.
 
 Works on the Spark (default http://127.0.0.1:8188) and from another machine
 (--base-url or $H3_COMFY_URL, e.g. http://spark-2a60:8188 over Tailscale).
@@ -45,6 +50,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import wave
 from typing import Any, Iterable
 
 # Free fields only. Canvas / frames / steps / checkpoint names stay locked.
@@ -69,6 +75,14 @@ AUDIO_TAG_RE = re.compile(r"<Audio\s+(\d+)>")
 SAVE_LATENT_TITLE_RE = re.compile(r"^save_latent_([a-z]+)$")
 PREV_LATENT_TITLE_RE = re.compile(r"^prev_latent_([a-z]+)$")
 LATENT_FIRST_COUNTER = "00001"
+# Locked-audio graphs (workflows/h3-ref2va-fast-locked-audio-*.json): one LoadAudio titled
+# "soundtrack" is VAE-encoded and masked as kept. The H3 audio VAE runs at 32 kHz with 800
+# samples per latent tick and 40 ticks per second; ComfyUI sizes the audio latent as
+# round(frames / 24 * 40) ticks. A shorter file would leave an unmasked tail that H3 fills.
+SOUNDTRACK_TITLE = "soundtrack"
+SOUNDTRACK_RATE = 32000
+SOUNDTRACK_CHANNELS = 2
+SAMPLES_PER_TICK = 800
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8188"
 LOOPBACK_HOSTS = ("localhost", "::1")
@@ -507,6 +521,79 @@ def check_audio_tags(prompt: str, n_audios: int) -> str | None:
     )
 
 
+def soundtrack_loaders(graph: dict[str, Any]) -> list[tuple[str, dict]]:
+    """Return LoadAudio nodes titled exactly 'soundtrack'."""
+    found = []
+    for node_id, node in graph.items():
+        if not isinstance(node, dict) or node.get("class_type") != "LoadAudio":
+            continue
+        meta = node.get("_meta")
+        if isinstance(meta, dict) and meta.get("title") == SOUNDTRACK_TITLE:
+            found.append((str(node_id), node))
+    return found
+
+
+def graph_frame_length(graph: dict[str, Any]) -> int | None:
+    """Frame count of the Ref2VA node's `length`, following one link to a PrimitiveInt."""
+    lengths = set()
+    for _node_id, node in _ref2va_nodes(graph):
+        value = (node.get("inputs") or {}).get("length")
+        if _is_link(value) and value:
+            src = graph.get(str(value[0]))
+            if isinstance(src, dict) and src.get("class_type") == "PrimitiveInt":
+                value = (src.get("inputs") or {}).get("value")
+        if isinstance(value, int) and not isinstance(value, bool):
+            lengths.add(value)
+    return lengths.pop() if len(lengths) == 1 else None
+
+
+def soundtrack_samples(frames: int) -> int:
+    return round(frames / 24 * 40) * SAMPLES_PER_TICK
+
+
+def check_soundtrack(graph: dict[str, Any], host_path: str | None) -> str | None:
+    """Return an error unless --soundtrack and the graph's soundtrack loader match exactly."""
+    loaders = soundtrack_loaders(graph)
+    if host_path is None:
+        if loaders:
+            return (
+                "error: this graph locks a soundtrack (LoadAudio titled 'soundtrack'); "
+                "pass --soundtrack FILE.wav"
+            )
+        return None
+    if len(loaders) != 1:
+        return (
+            f"error: --soundtrack needs exactly one LoadAudio titled '{SOUNDTRACK_TITLE}' "
+            f"in the graph (found {len(loaders)}); use a locked-audio graph"
+        )
+    frames = graph_frame_length(graph)
+    if frames is None:
+        return "error: --soundtrack: cannot read one integer length from the Ref2VA node"
+    if frames < 5 or (frames - 5) % 17:
+        # ComfyUI would snap the length up to 17n+5 and size the audio latent for that, leaving ticks unmasked.
+        return f"error: --soundtrack: graph length {frames} is not a legal 17n+5 frame count"
+    path = os.path.abspath(os.path.expanduser(host_path))
+    try:
+        with wave.open(path, "rb") as wav:
+            rate, channels, n = wav.getframerate(), wav.getnchannels(), wav.getnframes()
+    except (OSError, EOFError, wave.Error) as exc:
+        return f"error: --soundtrack must be a readable PCM WAV file: {host_path} ({exc})"
+    want = soundtrack_samples(frames)
+    if rate != SOUNDTRACK_RATE or channels != SOUNDTRACK_CHANNELS or n != want:
+        return (
+            f"error: --soundtrack is {rate} Hz, {channels} ch, {n} samples; the graph "
+            f"({frames} frames) needs {SOUNDTRACK_RATE} Hz, {SOUNDTRACK_CHANNELS} ch, exactly "
+            f"{want} samples ({want / SOUNDTRACK_RATE:.4f} s). Make it with prepare_soundtrack.py"
+        )
+    return None
+
+
+def wire_soundtrack(graph: dict[str, Any], base_url: str, host_path: str) -> None:
+    """Upload the checked soundtrack and point the 'soundtrack' LoadAudio at it."""
+    (_node_id, node), = soundtrack_loaders(graph)
+    node.setdefault("inputs", {})["audio"] = upload_input_image(base_url, host_path, flag="--soundtrack")
+
+
 def default_output_root() -> str:
     return os.environ.get("H3_OUTPUT") or os.path.join(os.path.expanduser("~"), "h3-output")
 
@@ -693,6 +780,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "Uploaded via POST /upload/image.",
     )
     parser.add_argument(
+        "--soundtrack",
+        default=None,
+        help="Locked-audio graphs only: the complete soundtrack (PCM WAV, 32 kHz, stereo, exactly "
+        "round(length/24*40)*800 samples) for the LoadAudio titled 'soundtrack'. H3 keeps it "
+        "and draws the picture to it. Uploaded via POST /upload/image.",
+    )
+    parser.add_argument(
         "--continue-from",
         default=None,
         help="Chain-continue graphs only: the --name of the previous segment, whose saved "
@@ -748,6 +842,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.ref_audio:
         ref_audio_targets(graph, len(args.ref_audio))  # fail before any upload
+    error = check_soundtrack(graph, args.soundtrack)  # fail before any upload
+    if error:
+        print(error, file=sys.stderr)
+        return 1
 
     _patch_existing_scalars(graph, PROMPT_KEYS, prompt)
     patched_seed = _patch_existing_scalars(graph, SEED_KEYS, args.seed)
@@ -774,6 +872,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.ref_audio:
         wire_ref_audios(graph, base, args.ref_audio)
     drop_unwired_ref_audio_loaders(graph)
+    if args.soundtrack:
+        wire_soundtrack(graph, base, args.soundtrack)
 
     status, raw, parsed = http_json("POST", f"{base}/prompt", {"prompt": graph})
     if status != 200 or not isinstance(parsed, dict):

@@ -1134,3 +1134,107 @@ def test_ref_image_replaces_stale_nested_and_dotted_keys(tmp_path, mock_comfy):
     assert {k: v for k, v in inputs.items() if k.startswith("ref_images")} == {
         "ref_images.ref_image_0": ["24", 0]
     }
+
+
+# --- locked soundtrack (workflows/h3-ref2va-fast-locked-audio-*.json) ---------------------
+
+LOCKED = REPO / "workflows" / "h3-ref2va-fast-locked-audio-15s08-672-span2x.json"
+
+
+def _wav(path: Path, n: int, rate: int = 32000, channels: int = 2) -> Path:
+    import wave
+
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(channels)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * channels * n)
+    return path
+
+
+def _locked_workflow(tmp_path: Path, frames: int = 362) -> Path:
+    data = json.loads(LOCKED.read_text(encoding="utf-8"))
+    data["50"]["inputs"]["value"] = frames
+    workflow = tmp_path / "locked.json"
+    workflow.write_text(json.dumps(data), encoding="utf-8")
+    return workflow
+
+
+def test_soundtrack_uploads_and_patches_the_soundtrack_loader(tmp_path, mock_comfy):
+    track = _wav(tmp_path / "track.wav", 603 * 800)  # 362 frames -> round(603.33) ticks
+    img = tmp_path / "bear.png"
+    img.write_bytes(b"x")
+    result, _ = _run(["--prompt", "<Picture 1> bear dances.", "--ref-image", str(img),
+                      "--soundtrack", str(track)],
+                     _locked_workflow(tmp_path), tmp_path, mock_comfy.server_address[1])
+    assert result.returncode == 0, result.stderr + result.stdout
+    graph = mock_comfy.posted[0]["prompt"]
+    assert graph["80"]["inputs"]["audio"] == "track.wav"
+    assert graph["15"]["inputs"]["latent_image"] == ["84", 0]
+    assert mock_comfy.uploads == ["bear.png", "track.wav"]
+
+
+def test_soundtrack_length_follows_the_length_primitive(tmp_path, mock_comfy):
+    """124 frames (5.17 s) -> round(206.67) = 207 ticks -> 165,600 samples."""
+    track = _wav(tmp_path / "short.wav", 207 * 800)
+    result, _ = _run(["--prompt", "a bear dances", "--soundtrack", str(track)],
+                     _locked_workflow(tmp_path, 124), tmp_path, mock_comfy.server_address[1])
+    assert result.returncode == 0, result.stderr + result.stdout
+
+
+@pytest.mark.parametrize("n, rate, channels", [
+    (603 * 800 - 1, 32000, 2),   # one sample short: H3 would generate an unmasked tail
+    (603 * 800 + 800, 32000, 2),  # one tick long
+    (603 * 800, 44100, 2),        # wrong rate
+    (603 * 800, 32000, 1),        # mono
+])
+def test_soundtrack_with_wrong_shape_fails_before_any_upload(tmp_path, mock_comfy, n, rate, channels):
+    track = _wav(tmp_path / "bad.wav", n, rate, channels)
+    img = tmp_path / "bear.png"
+    img.write_bytes(b"x")
+    result, _ = _run(["--prompt", "<Picture 1> bear.", "--ref-image", str(img),
+                      "--soundtrack", str(track)],
+                     _locked_workflow(tmp_path), tmp_path, mock_comfy.server_address[1])
+    assert result.returncode == 1
+    assert "needs 32000 Hz, 2 ch, exactly 482400 samples" in result.stderr
+    assert mock_comfy.uploads == []
+    assert mock_comfy.posted == []
+
+
+def test_soundtrack_that_is_not_a_wav_fails_before_any_upload(tmp_path, mock_comfy):
+    bogus = tmp_path / "music.m4a"
+    bogus.write_bytes(b"not a wav")
+    result, _ = _run(["--prompt", "a bear", "--soundtrack", str(bogus)],
+                     _locked_workflow(tmp_path), tmp_path, mock_comfy.server_address[1])
+    assert result.returncode == 1
+    assert "readable PCM WAV" in result.stderr
+    assert mock_comfy.uploads == [] and mock_comfy.posted == []
+
+
+def test_locked_graph_without_soundtrack_flag_fails_before_post(tmp_path, mock_comfy):
+    result, _ = _run(["--prompt", "a bear"], _locked_workflow(tmp_path),
+                     tmp_path, mock_comfy.server_address[1])
+    assert result.returncode == 1
+    assert "pass --soundtrack" in result.stderr
+    assert mock_comfy.posted == []
+
+
+def test_soundtrack_on_a_graph_without_the_loader_fails_before_any_upload(tmp_path, mock_comfy):
+    track = _wav(tmp_path / "track.wav", 603 * 800)
+    workflow = tmp_path / "fast.json"
+    shutil.copy(REPO / "workflows" / "h3-ref2va-fast-15s08-672-span2x.json", workflow)
+    result, _ = _run(["--prompt", "a bear", "--soundtrack", str(track)],
+                     workflow, tmp_path, mock_comfy.server_address[1])
+    assert result.returncode == 1
+    assert "exactly one LoadAudio titled 'soundtrack'" in result.stderr
+    assert mock_comfy.uploads == [] and mock_comfy.posted == []
+
+
+def test_soundtrack_rejects_an_illegal_length_before_any_upload(tmp_path, mock_comfy):
+    """ComfyUI snaps 240 up to 243 frames (405 ticks); a 400-tick file would leave 5 ticks for H3 to invent."""
+    track = _wav(tmp_path / "track.wav", 400 * 800)
+    result, _ = _run(["--prompt", "a bear", "--soundtrack", str(track)],
+                     _locked_workflow(tmp_path, 240), tmp_path, mock_comfy.server_address[1])
+    assert result.returncode == 1
+    assert "not a legal 17n+5" in result.stderr
+    assert mock_comfy.uploads == [] and mock_comfy.posted == []

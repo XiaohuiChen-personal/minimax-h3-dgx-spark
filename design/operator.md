@@ -73,7 +73,7 @@ The JSON is a shopping list. The hard work is inside one sampler node.
 | Sampler, Sage 2.2, Sol-Attn `triton_ref`, FBC `H3 Safe` | Optional `--ref-image` host files (Ref2VA, variable 1–9) |
 | Length of the chosen default file | Optional first/last-frame files (only if that graph has the keys) |
 
-The optional quality graph (`h3-ref2va-quality-15s08-20step-1344.json`) is the exception: **20 steps**, **1344×768**, no Turbo, no FBC, no SPAN. The optional max-quality graph (`h3-ref2va-maxq-15s08-25step-1344.json`) goes further: **25 steps**, `beta` scheduler, Sol-Attn off, same canvas, ~85 min.
+The optional quality graph (`h3-ref2va-quality-15s08-20step-1344.json`) is the exception: **20 steps**, **1344×768**, no Turbo, no FBC, no SPAN. The optional max-quality graph (`h3-ref2va-maxq-15s08-25step-1344.json`) goes further: **25 steps**, `beta` scheduler, Sol-Attn off, same canvas, ~2 h 10 min with six stills (310 s/step, re-measured 2026-11-17). The fast pair (`h3-ref2va-fast-15s08-672-span2x.json`, `h3-ref2va-fast-locked-audio-15s08-672-span2x.json`) runs those settings at 672×384 with stills at `match`, then SPAN 2× and a mild `ImageSharpen` inside the graph: ~13 min, Claude Code's default since 2026-11-17.
 
 Default Ref2VA lengths (D-15). These files are the starting point, not a closed set:
 
@@ -85,7 +85,7 @@ Default Ref2VA lengths (D-15). These files are the starting point, not a closed 
 | Quality (optional) | `workflows/h3-ref2va-quality-15s08-20step-1344.json` | **15.08** | **362** | `h3-ref2va-quality-15s08` |
 | Max quality (optional) | `workflows/h3-ref2va-maxq-15s08-25step-1344.json` | **15.08** | **362** | `h3-ref2va-maxq-15s08` |
 
-Snap “15 s” / “15.04 s” to **15.08 s / 362** on the Turbo long file. Never invent **15.00** or **15.04**. Use the quality file only when the operator asked for no-Turbo / 20-step / 1344×768 (~45 min on this box; no SPAN). Use the max-quality file only when they asked for the best possible result (~85 min; pass `--timeout 7200` or more). If the user says “10 seconds,” snap to **10.13 s** (243 frames) — copy a default graph and set `length` 243, or refuse. Do not invent 10.00 s. Copy, modify, or create a graph when the use case does not fit a default. Text-only / no identity images uses `workflows/h3-fl2va-default-8s.json` (or the 5.17 s smoke) unless a new FL2VA graph is required.
+Snap “15 s” / “15.04 s” to **15.08 s / 362** on the Turbo long file. Never invent **15.00** or **15.04**. Use the quality file only when the operator asked for no-Turbo / 20-step / 1344×768 (~45 min on this box; no SPAN). Use the max-quality file only when they asked for the best possible result (~2 h 10 min with six stills; pass `--timeout 14400`). If the user says “10 seconds,” snap to **10.13 s** (243 frames) — copy a default graph and set `length` 243, or refuse. Do not invent 10.00 s. Copy, modify, or create a graph when the use case does not fit a default. Text-only / no identity images uses `workflows/h3-fl2va-default-8s.json` (or the 5.17 s smoke) unless a new FL2VA graph is required.
 
 ## Identity stills (default Ref2VA) vs FL2VA keyframes
 

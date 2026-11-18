@@ -1,4 +1,4 @@
-# What to write so an 85-minute run lands
+# What to write so a run lands (fast ~13 min or slow ~2 h)
 
 The format rules are in `design/prompting.md`: section order, timestamps, labels, speech blocks, examples. That file is a digest. The full official guides are `ref-en.txt` (Ref2VA) and `base-en.txt` (FL2VA). Both live in the `h3-prompt-writing` skill (`~/.claude/skills/h3-prompt-writing/references/`) and on the [HF model card](https://huggingface.co/MiniMaxAI/MiniMax-H3). This file covers **content**: the choices that decide whether the video matches the request.
 

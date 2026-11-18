@@ -383,3 +383,58 @@ def test_maxq_chain_graphs_match_maxq_and_lock_39_frames():
     assert cont["53"]["inputs"]["batch_size"] == 12 and cont["58"]["inputs"]["width"] == 65
     # 39 frames = 12 latent slots (1+4+4+4+4 + 1+4+4+4+4 + 1+4) and 39 / 24 * 40 = 65 audio ticks.
     assert sum((1, 4, 4, 4, 4)[k % 5] for k in range(12)) == 39 and 39 * 40 % 24 == 0
+
+
+FAST = "h3-ref2va-fast-15s08-672-span2x.json"
+FAST_LOCKED = "h3-ref2va-fast-locked-audio-15s08-672-span2x.json"
+
+
+def test_fast_graphs_are_maxq_at_672x384_plus_span():
+    """Fast default (operator, 2026-11-17): every maxq knob, quarter canvas, refs at match, SPAN 2x after decode."""
+    maxq = prompt_graph(load("h3-ref2va-maxq-15s08-25step-1344.json"))
+    for name in (FAST, FAST_LOCKED):
+        g = prompt_graph(load(name))
+        for nid in ("1", "2", "3", "4", "6", "7", "8", "11", "12", "13", "14", "16", "17", *[str(i) for i in range(24, 33)]):
+            assert g[nid]["class_type"] == maxq[nid]["class_type"], (name, nid)
+            assert g[nid]["inputs"] == maxq[nid]["inputs"], (name, nid)
+        r = g["10"]["inputs"]
+        assert (r["width"], r["height"], r["ref_image_size"]) == (672, 384, "match"), name
+        assert {k: v for k, v in r.items() if k not in ("width", "height", "ref_image_size", "length")} == {
+            k: v for k, v in maxq["10"]["inputs"].items() if k not in ("width", "height", "ref_image_size", "length")
+        }, name
+        assert g["13"]["inputs"]["steps"] == 25 and g["13"]["inputs"]["scheduler"] == "beta", name
+        assert g["8"]["inputs"]["enabled"] is False, name  # Sol-Attn off: exact Sage 2.2 everywhere
+        assert g["18"] == {"class_type": "UpscaleModelLoader", "_meta": g["18"]["_meta"],
+                           "inputs": {"model_name": "2x-spanx2-ch48.pth"}}, name
+        assert g["19"]["class_type"] == "ImageUpscaleWithModel", name
+        assert g["19"]["inputs"] == {"upscale_model": ["18", 0], "image": ["16", 0]}, name
+        # SPAN on the raw decode (no mp4 in between), then a mild sharpen: measured 2026-11-17, a low-res render
+        # upscaled this way had softer outlines than native (index 3.15 vs 3.52); alpha 0.1 brings it to 3.60.
+        assert g["20"]["class_type"] == "ImageSharpen", name
+        assert g["20"]["inputs"] == {"image": ["19", 0], "sharpen_radius": 1, "sigma": 1.0, "alpha": 0.1}, name
+        assert g["22"]["inputs"]["images"] == ["20", 0], name
+        assert g["22"]["inputs"]["audio"] == ["17", 0], name
+        classes = [n["class_type"] for n in g.values()]
+        assert not any("LoraLoader" in c for c in classes), name
+        assert "ImageScale" not in classes, name  # SPAN is exactly 2x; a size lock would break vertical copies
+        assert not any("FirstBlockCache" in c or "EasyCache" in c for c in classes), name
+    assert prompt_graph(load(FAST))["10"]["inputs"]["length"] == 362
+    assert prompt_graph(load(FAST))["15"]["inputs"]["latent_image"] == ["10", 1]
+    assert prompt_graph(load(FAST))["23"]["inputs"]["filename_prefix"] == "h3-ref2va-fast-15s08"
+
+
+def test_fast_locked_audio_graph_keeps_the_whole_soundtrack():
+    g = prompt_graph(load(FAST_LOCKED))
+    assert g["10"]["inputs"]["length"] == ["50", 0]
+    assert g["50"]["class_type"] == "PrimitiveInt" and g["50"]["inputs"]["value"] == 362
+    assert g["52"]["inputs"] == {"expression": "round(a * 40 / 24)", "values.a": ["50", 0]}
+    loaders = [(nid, n) for nid, n in g.items() if n["class_type"] == "LoadAudio"]
+    assert [(nid, (n.get("_meta") or {}).get("title")) for nid, n in loaders] == [("80", "soundtrack")]
+    assert g["81"]["inputs"] == {"audio": ["80", 0], "vae": ["4", 0]}  # the 32 kHz audio VAE
+    assert g["82"]["inputs"] == {"value": 0.0, "width": ["52", 1], "height": 2}  # 0 = keep every tick
+    assert g["83"]["inputs"] == {"samples": ["81", 0], "mask": ["82", 0]}
+    assert g["84"]["inputs"] == {"video_latent": ["10", 1], "audio_latent": ["83", 0]}
+    assert g["15"]["inputs"]["latent_image"] == ["84", 0]
+    assert g["23"]["inputs"]["filename_prefix"] == "h3-ref2va-fast-locked-15s08"
+    # 362 frames -> 603 ticks -> 482,400 samples at 32 kHz (submit-prompt.py --soundtrack checks this).
+    assert round(362 / 24 * 40) == 603 and round(124 / 24 * 40) == 207

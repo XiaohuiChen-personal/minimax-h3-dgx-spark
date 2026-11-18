@@ -1,6 +1,6 @@
 # `workflows/` — default ComfyUI graphs
 
-Five **Turbo** graphs are the product defaults, plus an FL2VA **keyframe** graph and two optional no-Turbo **quality** Ref2VA graphs. Use them as-is, copy and modify them, or add another API-format JSON when the use case needs it. Do not overwrite a shipped JSON unless the operator asked to change that default. One-off graphs go in a new filename. Do not ship a stock Comfy-Org UI-format template unchanged.
+Five **Turbo** graphs are the product defaults, plus an FL2VA **keyframe** graph, two optional no-Turbo **quality** Ref2VA graphs, and the two **fast** max-quality Ref2VA graphs that Claude Code uses by default (`.claude/skills/h3-make-video-fast/`). Use them as-is, copy and modify them, or add another API-format JSON when the use case needs it. Do not overwrite a shipped JSON unless the operator asked to change that default. One-off graphs go in a new filename. Do not ship a stock Comfy-Org UI-format template unchanged.
 
 ```text
 workflows/
@@ -9,6 +9,8 @@ workflows/
   h3-ref2va-long-15s08.json                 # optional long:      960×544, length 362, 4 steps, SPAN 2×
   h3-ref2va-quality-15s08-20step-1344.json  # optional quality:   1344×768, length 362, 20 steps, no Turbo / SPAN / FBC
   h3-ref2va-maxq-15s08-25step-1344.json     # max quality:        1344×768, length 362, 25 steps, beta, Sol-Attn off
+  h3-ref2va-fast-15s08-672-span2x.json      # fast max quality:   672×384 (copy: 384×672), maxq knobs, refs match, SPAN 2× → 1344×768
+  h3-ref2va-fast-locked-audio-15s08-672-span2x.json  # as above + a fixed soundtrack locked in (--soundtrack)
   h3-fl2va-smoke-5s17.json                  # text-only smoke:    960×544, length 124, 8 steps, SPAN 2×
   h3-fl2va-default-8s.json                  # text-only generate: 960×544, length 192, 8 steps, SPAN 2×
   h3-fl2va-keyframes-8s.json                # I2VA / FL2VA / L2VA: as above + LoadImage first_frame / last_frame
@@ -16,7 +18,7 @@ workflows/
 
 Prompts are H3's structured format, not one-liners: [`../design/prompting.md`](../design/prompting.md). The `prompt` strings committed in these files are placeholders; `--prompt-file` replaces them.
 
-Default generate is **Ref2VA 8.00 s**. Snap “15 s” / “15.04 s” to `h3-ref2va-long-15s08.json` (**15.08 s / 362**, Turbo). Never invent **15.00** or **15.04**. Use the quality file only when the operator asked for no-Turbo / 20-step / 1344×768, and the max-quality file only when they asked for the best possible result and accept ~85 min. Text-only / no identity images uses the FL2VA pair.
+Default generate is **Ref2VA 8.00 s**. Snap “15 s” / “15.04 s” to `h3-ref2va-long-15s08.json` (**15.08 s / 362**, Turbo). Never invent **15.00** or **15.04**. Use the quality file only when the operator asked for no-Turbo / 20-step / 1344×768, and the max-quality file only when they asked for the best possible result and accept ~2 h 10 min. Claude Code's full video requests default to the fast pair below (~13 min). Text-only / no identity images uses the FL2VA pair.
 
 `<Picture N>` and `MiniMaxH3ReferenceToVideo` belong on Ref2VA graphs. Do not put those tags or that node on an FL2VA graph.
 
@@ -56,7 +58,26 @@ Operator note: Turbo quality is acceptable on FL2VA (text-only or first-frame); 
 - **`beta` scheduler** instead of `simple`. Comfy-Org R2V template note: “`beta` or `normal` scheduler tends to outperform `simple` for reference-heavy prompts.”
 - **Sol-Attn off** (`enabled: false`, other Sol inputs unchanged), so every block runs exact Sage 2.2 attention instead of the sparse approximation.
 
-Everything else matches the quality graph: 1344×768, length 362, no Turbo LoRA, `res_multistep`, shifts **12 / 3**, `ref_image_size=max`, no FirstBlockCache, no EasyCache, no SPAN. Measured on this GB10 with six reference stills: **196.85 s/step**, **85.4 min** end to end (`Prompt executed in 01:25:24`). The default `--timeout` (3600 s) is too short; pass `--timeout 7200` or more (more again if a job is queued ahead). First use: a two-bear snowy-courtyard clip where both characters matched their three-view stills. Use it only when the operator asks for the best possible result and accepts the wait; otherwise the 20-step quality graph is the no-Turbo default.
+Everything else matches the quality graph: 1344×768, length 362, no Turbo LoRA, `res_multistep`, shifts **12 / 3**, `ref_image_size=max`, no FirstBlockCache, no EasyCache, no SPAN. Measured on this GB10 with six reference stills: **196.85 s/step**, **85.4 min** end to end (`Prompt executed in 01:25:24`). The default `--timeout` (3600 s) is too short; pass `--timeout 14400` (see the re-measurement below). First use: a two-bear snowy-courtyard clip where both characters matched their three-view stills. Use it only when the operator asks for the best possible result and accepts the wait; otherwise the 20-step quality graph is the no-Turbo default.
+
+Re-measured 2026-11-17 with six ~1.5k px stills actually wired (the 85.4 min run above predates the dotted-keys fix, so its stills were silently dropped): **310 s/step**, **2 h 12 min** at 768×1344. Pass `--timeout 14400`.
+
+## Ref2VA fast max quality (Claude Code default since 2026-11-17)
+
+`h3-ref2va-fast-15s08-672-span2x.json` is the max-quality graph with three changes:
+
+- **672×384** canvas (node `10`; set 384×672 on a copy for vertical). Token count drops from ~142k to ~33k with six stills, so attention cost falls ~19×.
+- **`ref_image_size=match`**: stills scale down to the canvas area.
+- **SPAN 2×** (`2x-spanx2-ch48.pth`) on the raw video VAE decode, then **`ImageSharpen`** (radius 1, sigma 1.0, alpha 0.1), then `CreateVideo`, so the mp4 is 1344×768 (or 768×1344). Measured 2026-11-17: a low-res render upscaled by SPAN alone had softer outlines than native (index 3.15 vs 3.52); the sharpen brings it to 3.60 with no visible halo. No `ImageScale` size lock: SPAN is exactly 2×, and a fixed lock would squash a vertical copy. `SaveVideo` stays at its default encoding (CRF 16 tripled the file with no sharpness gain).
+
+Everything else is the maxq graph: no Turbo LoRA, 25 steps, `res_multistep` + `beta`, shifts 12 / 3, Sol-Attn off, no FBC / EasyCache. Measured 2026-11-17 (six stills, 384×672, 15.08 s): **26.7 s/step**, about **12 min** sampling plus ~1 min load and decode; SPAN on 362 frames took 37 s as a separate job. Against the native 768×1344 render of the same story, SPAN of its own 384×672 downscale scored SSIM 0.981 with slightly crisper lines (edge gradient 246 vs 233). The operator watched both and chose the fast one.
+
+`h3-ref2va-fast-locked-audio-15s08-672-span2x.json` adds a fixed soundtrack:
+
+- `LoadAudio` titled `soundtrack` → `VAEEncodeAudio` (H3 audio VAE) → `SetLatentNoiseMask` with a `SolidMask` of **0** (keep every tick) → `LTXVConcatAVLatent` with node `10`'s empty AV latent → sampler. H3 pins the masked audio rows at the condition timestep, so it draws the picture to the sound.
+- Length lives on node `50` (`PrimitiveInt`); node `52` computes the tick count `round(length * 40 / 24)` for the mask.
+- `submit-prompt.py --soundtrack FILE.wav` uploads the file and fails before any upload unless it is PCM, 32 kHz, stereo and exactly `round(length/24*40)*800` samples. A shorter file would leave an unmasked tail for H3 to fill.
+- Measured 2026-11-17: a dancer hopped on 19–20 of 20 beats; reactions landed within 0.1 s of their sound effects. The output audio is the soundtrack after a VAE round trip; replace it with the lossless mix (`mux_audio.py` in the fast skill).
 
 ## FL2VA (text-only / no identity images)
 
@@ -98,6 +119,7 @@ Prompt: start with the official alignment line ([`../design/prompting.md`](../de
 - output filename
 - optional `--ref-image` local files (Ref2VA only; uploaded via `POST /upload/image`)
 - optional `--first-frame` / `--last-frame` local files (keyframe graphs only; uploaded and linked)
+- `--soundtrack` local WAV (locked-audio graphs only; checked, uploaded, required there)
 
 Canvas, steps, length, LoRA on/off, and extra nodes may change on a **copy** or a new file when the use case needs it. 3-view sheets are Ref2VA `--ref-image`, **not** `first_frame`.
 

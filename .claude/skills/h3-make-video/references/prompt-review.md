@@ -18,7 +18,7 @@ for the review:
   "No voices are heard" (without the last one, random speech is a known failure). A long list of
   visual objects the prompt does not want ("no lanterns, no plaque, no ...") is the risky case:
   flag it as a possible plant (unmeasured).
-- One run costs about 85 minutes, so every real problem you find now saves a run.
+- One run costs about <RUN TIME: ~13 minutes on the fast default, ~2 hours on the slow max-quality path>, so every real problem you find now saves a run.
 Be adversarial: assume the prompt is wrong somewhere and find where. Do not rewrite the prompt.
 
 Materials (open every file):
