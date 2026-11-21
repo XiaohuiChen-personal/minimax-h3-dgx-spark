@@ -62,6 +62,7 @@ Order is fixed: `subject_definitions`, `summary`, `retention_analysis`, `detaile
 - **`retention_analysis`** — one line per label: `<Subject 1> (appears in [Shot 1], [Shot 2]): fully_preserved - …`. Markers: `fully_preserved`, `partially_preserved`, `attribute_transfer`, `weak_reference`.
 - **`detailed_description`** — style sentence(s) first, then `[Shot 1] …`. **350–500 words** for a generate. Re-state each subject's key traits where it first appears in a shot. Use `<Subject N> (S1)` when a subject speaks.
 - **`overall_soundscape`** / **`non_diegetic_music`** — as above.
+- **A still pinned as a frame** (Ref2VA graph + `MiniMaxH3AddGuide`, `workflows/README.md`): give it a standalone line (`<Picture 7> is the first frame of [Shot 1]: …`, describing what it shows), tag the summary `[keyframe completion + reference generation]`, start the shot with `The shot begins exactly from <Picture 7>.`, and add `<Picture 7> ([Shot 1] first frame): fully_preserved - …` to `retention_analysis` (official ref guide §2.2, §3, §4).
 
 Ref2VA Turbo is the 4-step LoRA. It is weak for dialogue (D-06). For speech, use FL2VA 8 steps or the no-Turbo quality graph.
 

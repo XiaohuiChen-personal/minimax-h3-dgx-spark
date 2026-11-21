@@ -11,7 +11,7 @@ services:
       dockerfile: deploy/Dockerfile
       args:
         BASE_IMAGE: nvcr.io/nvidia/pytorch:25.12-py3
-        COMFYUI_SHA: b78cec879b9460d5cb25228a83a942fb78d2cd24
+        COMFYUI_SHA: a277b5bf213e8a44fa34817b7770b54f86ef4cea  # v0.46.0 (2026-11-18)
         KJNODES_SHA: 3f20054214fec9f9234fd3841ae6f1e4287948f6
         SOL_ATTN_SHA: 930a4d6e432ff8b8ed5e30ff2f72519b92d69bdf
         FBC_SHA: 725973c3bfd9de6dce249bc93dc5fe27f820df31

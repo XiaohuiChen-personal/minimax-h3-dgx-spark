@@ -98,6 +98,7 @@ The agent uploads each still with `POST /upload/image`, then `submit-prompt.py` 
 | Repeat `--ref-image` on a Ref2VA graph (1–9 host files) | Upload, then nest `ref_images.ref_image_0`… | Identity condition. Prompt uses `<Picture 1>`…`<Picture N>` in upload order |
 | Write `<Picture N>` on an FL2VA graph | Nothing useful | Empty theater — do not do this |
 | Treat a 3-view sheet as `first_frame` | Fail-close on default FL2VA T2V graphs | Wrong path. Use Ref2VA `--ref-image` |
+| Need an exact frame (for example the opening scene) **and** identity stills | Ref2VA copy + `MiniMaxH3AddGuide` on that still's `ref_image_K` (`workflows/README.md`) | Frame pinned at `frame_idx`, identity from the other stills (tested 2026-11-20, ComfyUI v0.46.0) |
 | Omit `--ref-image` on Ref2VA | POST without a `ref_images` dict | Node-legal, not a proven identity generate |
 
 To make **start** require FL2VA weights instead of Ref2VA: `H3_TASK=fl2va` in `deploy/.env` or the compose environment, then recreate the container. Selecting FL2VA for a generate is passing the FL2VA JSON to `submit-prompt.sh`. Both weight sets should already be on disk (`download-weights.sh` defaults to `--task all`).

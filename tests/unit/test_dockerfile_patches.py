@@ -1,34 +1,38 @@
-"""The ComfyUI pin stays fixed; quality backports are applied and tested in the image build."""
+"""The ComfyUI pin is fixed (D-11); the H3 VAE tile-blend fix is upstream and still tested in the build."""
 
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-PATCH = ROOT / "deploy" / "patches" / "comfyui-h3-vae-tile-blend.patch"
 TEST = ROOT / "deploy" / "patches" / "test_h3_vae_tile_blend.py"
+PIN = "a277b5bf213e8a44fa34817b7770b54f86ef4cea"  # ComfyUI v0.46.0
 
 
-def test_vae_tile_blend_patch_is_applied_and_tested_in_build():
+def test_pin_is_recorded_in_dockerfile_and_compose():
+    dockerfile = (ROOT / "deploy" / "Dockerfile").read_text()
+    compose = (ROOT / "deploy" / "compose.yaml").read_text()
+    assert f"ARG COMFYUI_SHA={PIN}" in dockerfile
+    assert f"COMFYUI_SHA: {PIN}" in compose
+    assert "b78cec879b9460d5cb25228a83a942fb78d2cd24" not in dockerfile + compose
+
+
+def test_vae_tile_blend_regression_test_runs_in_build():
     dockerfile = (ROOT / "deploy" / "Dockerfile").read_text()
     assert "COPY deploy/patches /opt/h3/patches" in dockerfile
-    assert "patch -p1 --forward --fuzz=0 < /opt/h3/patches/comfyui-h3-vae-tile-blend.patch" in dockerfile
     assert "python /opt/h3/patches/test_h3_vae_tile_blend.py" in dockerfile
+    # fc584aaa is upstream in the pin: nothing is patched any more, and the fixed loop must be there.
+    assert "patch -p1" not in dockerfile
+    assert "grep -q 'Tiles blend against' comfy/ldm/minimax/vae.py" in dockerfile
+    assert not (ROOT / "deploy" / "patches" / "comfyui-h3-vae-tile-blend.patch").exists()
     # Late layer: after the expensive SageAttention / torchaudio builds, before COPY scripts.
-    assert dockerfile.index("comfyui-h3-vae-tile-blend.patch") > dockerfile.index("torchaudio-2.9.0")
-    assert dockerfile.index("comfyui-h3-vae-tile-blend.patch") < dockerfile.index("COPY scripts /opt/h3/scripts")
-    # The pin itself does not move.
-    assert "ARG COMFYUI_SHA=b78cec879b9460d5cb25228a83a942fb78d2cd24" in dockerfile
-
-
-def test_vae_tile_blend_patch_targets_only_tiled_decode():
-    text = PATCH.read_text()
-    assert text.startswith("--- a/comfy/ldm/minimax/vae.py\n+++ b/comfy/ldm/minimax/vae.py\n")
-    assert text.count("\n@@ ") + text.startswith("@@ ") == 1
-    removed = [l for l in text.splitlines() if l.startswith("-") and not l.startswith("---")]
-    added = [l for l in text.splitlines() if l.startswith("+") and not l.startswith("+++")]
-    assert any("row_tails" in l for l in removed)
-    assert not any("row_tails" in l for l in added)
-    assert any("Backport of upstream ComfyUI fc584aaa" in l for l in added)
+    assert dockerfile.index("test_h3_vae_tile_blend.py") > dockerfile.index("torchaudio-2.9.0")
+    assert dockerfile.index("test_h3_vae_tile_blend.py") < dockerfile.index("COPY scripts /opt/h3/scripts")
     assert TEST.is_file()
+
+
+def test_tile_blend_fake_decoder_handles_batched_tiles():
+    # upstream v0.46 decodes up to 4 tiles per call; a batch-1 fake would break chunk() silently
+    text = TEST.read_text()
+    assert "for b in range(zt.shape[0])" in text
 
 
 def test_dockerignore_keeps_patches_in_build_context():

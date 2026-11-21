@@ -33,5 +33,16 @@ Method: wall-clock around the transfer; bytes from the finished file or `docker 
 | 2026-08-24T03:02:46Z | diffusion_models/minimax_h3_fl2va_pruned_fp8_scaled.safetensors | https://huggingface.co/Comfy-Org/MiniMax-H3 | 20958205608 | 0 | n/a | n/a | cache-hit |
 | 2026-08-24T03:02:46Z | loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors | https://huggingface.co/Comfy-Org/MiniMax-H3 | 1956193000 | 0 | n/a | n/a | cache-hit |
 | 2026-08-24T04:07:16Z | h3-spark:local | docker compose -f deploy/compose.yaml build | 21008788308 | 0 | n/a | n/a | cache-hit; linux/arm64; inspect Size; LABEL D-01..D-15; expensive layers CACHED; COPY scripts/workflows rerun |
+| 2026-11-21T00:46:39Z | ComfyUI.git | https://github.com/comfyanonymous/ComfyUI.git | 74847541 | 3.45 | 20.7 | 2.2 | pin=a277b5bf213e8a44fa34817b7770b54f86ef4cea (v0.46.0); docker build; bytes = du -sb after clone |
+| 2026-11-21T00:46:39Z | ComfyUI-KJNodes.git | https://github.com/kijai/ComfyUI-KJNodes.git | 5010590 | 1.72 | 2.8 | 0.3 | pin=3f200542 (unchanged); docker build |
+| 2026-11-21T00:46:39Z | ComfyUI-sol-attn.git | https://github.com/Saganaki22/ComfyUI-sol-attn.git | 332293 | 0.62 | 0.5 | 0.1 | pin=930a4d6e (unchanged); docker build |
+| 2026-11-21T00:46:39Z | ComfyUI-MiniMaxH3-FirstBlockCache.git | https://github.com/duckyshell/ComfyUI-MiniMaxH3-FirstBlockCache.git | 1746313 | 1.01 | 1.6 | 0.2 | pin=725973c3 (unchanged); docker build |
+| 2026-11-21T00:46:39Z | SageAttention.git | https://github.com/thu-ml/SageAttention.git | 97780543 | 2.98 | 31.3 | 3.3 | pin=eb615cf6 tag v2.2.0; docker build |
+| 2026-11-21T00:46:39Z | pytorch-audio.git | https://github.com/pytorch/audio.git | 152778809 | 1.90 | 76.7 | 8.0 | branch=v2.9.0; docker build |
+| 2026-11-21T00:46:39Z | nvcr.io/nvidia/pytorch:25.12-py3 | nvcr.io | n/a | 0 | n/a | n/a | cache-hit; base layer reused by the v0.46.0 rebuild |
+| 2026-11-21T00:50:30Z | h3-spark:local | docker compose -f deploy/compose.yaml build | 21126218590 | 231 | n/a | n/a | full rebuild after the ComfyUI pin moved to v0.46.0 (231 s wall clock, mostly SageAttention 75.9 s + torchaudio 80.1 s compiles); inspect Size; old image tagged h3-spark:b78cec87-0.33.0 |
 
 Task 6 D-02 + SPAN vs 8 Gbps (1000 MB/s): six files, **55,877,746,650** `stat` bytes (**52.04 GiB**), **85.97 s** wall-clock sum (not overlapping). Best file: INT8 TE **844.0 MiB/s** (88.5% of line rate). Worst file: SPAN **8.4 MiB/s** (0.9%; 8.5 MiB from Oracle Phoenix, RTT-bound). Aggregate **619.9 MiB/s** / **65.0%** of 1000 MB/s. A perfect 1e9 B/s line would need **~55.9 s**; Hugging Face on this path was faster than the NGC image pull (103.5 MiB/s) and slower than line rate, as expected.
+
+
+2026-11-20 ComfyUI v0.46.0 rebuild: the six git clones above total **332,495,089** bytes in **11.68 s** (27.1 MiB/s, 2.8 % of line rate; small repos are RTT-bound). The `pip install` of the v0.46.0 requirements (comfy-kitchen 0.2.41, comfy-aimdo 0.6.0, frontend 1.59.6, …) ran inside the build and was not timed per package. Source-inspection clones on the MacBook (`--filter=blob:none`, blobs fetched lazily) are not counted: their bytes are not known at clone time.

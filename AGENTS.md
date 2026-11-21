@@ -47,7 +47,7 @@ Full cards: `design/decisions.md`. Do not reopen a locked decision without new m
 | D-08 | Long-lived ComfyUI. Agent does not restart it per video. |
 | D-09 | NGC PyTorch CUDA 13 `linux/arm64` base. Pin the tag at implement time. |
 | D-10 | Weights on the host (`~/h3-weights`). Never in git. Never in a Docker layer. Never downloaded at `docker build`. |
-| D-11 | Pin ComfyUI SHA after `bdcb886a`. Record it. Do not float on `master`. |
+| D-11 | Pin ComfyUI SHA after `bdcb886a`. Record it. Do not float on `master`. Current pin: **v0.46.0** `a277b5bf` (since 2026-11-20; was `b78cec87` / 0.33.0). Pins and the rebuild note: `deploy/README.md`. |
 | D-12 | SageAttention **2.2.0** + Sol-Attn **`triton_ref`** + FirstBlockCache **`H3 Safe`** + SPAN. |
 | D-13 | Do **not** gate start on `H3_LICENSE_ACK`. Operator accepts Community License risk. Start if weight files exist. |
 | D-14 | `deploy/compose.yaml`, image `h3-spark:local`, `~/h3-output`, `~/h3-data`, port 8188. |
@@ -116,6 +116,7 @@ The files below are **defaults for reference**. Use one unchanged when it alread
 | Text-only / no identity images, about 8 seconds | `workflows/h3-fl2va-default-8s.json` | **8.00 s / 192** |
 | Text-only fast smoke | `workflows/h3-fl2va-smoke-5s17.json` | **5.17 s / 124** |
 | Start from a still (I2VA), first + last frame (FL2VA), or end on a still (L2VA) | `workflows/h3-fl2va-keyframes-8s.json` | **8.00 s / 192** |
+| An exact opening (or mid-clip) frame **and** identity stills in one clip | a copy of a Ref2VA graph + `MiniMaxH3AddGuide` (recipe: `workflows/README.md` § Ref2VA + an exact frame) | as the copied graph |
 
 Snap “15 s” / “15.04 s” to **15.08 s / 362**. Never invent **15.00** or **15.04**. If they say “10 seconds,” snap to **10.13 s / 243** — copy a default graph and set `length` 243, or ask them to accept 8.00 s. Never invent **10.00 s**.
 

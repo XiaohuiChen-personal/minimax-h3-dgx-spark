@@ -142,6 +142,8 @@ Exact host tree: see [`container.md`](container.md).
 
 **Why.** Older ComfyUI put video and audio on one clock. Those builds are not evidence and not a base.
 
+**Pin history.** `b78cec87` (0.33.0, 2026-08-23) until 2026-11-20, then **v0.46.0** `a277b5bf213e8a44fa34817b7770b54f86ef4cea` (2026-11-18) at the operator's request: it is the documented base (0.34.0+) for Ref2VA + `MiniMaxH3AddGuide`, carries every upstream H3 fix since August (the VAE tile-blend backport is no longer needed), and kept the same s/step on this GB10. Evidence: `measurements/comfyui-v0.46-upgrade-2026-11-20.md`.
+
 ## D-12 · First image includes the agreed speed-ups
 
 **Status:** adopted for implementation

@@ -9,7 +9,12 @@ Each fake tile decodes to a smooth global image plus a tile-specific constant, s
 neighbouring tiles disagree inside their overlaps. Correct blending (upstream
 ComfyUI fc584aaa / #16436) equals sum_i sum_j wy_i(y) * wx_j(x) * tile_ij with the
 same linear ramps `blend` uses. The pre-fix loop leaves a step where a vertical and
-a horizontal overlap cross. Pass --expect-bug to assert the unpatched loop is wrong.
+a horizontal overlap cross. Pass --expect-bug to assert the unpatched loop is wrong
+(only meaningful on a ComfyUI older than fc584aaa).
+
+Since the pin moved to v0.46.0 (2026-11-20) the fix is upstream and there is no patch
+left to apply; the build still runs this test as a regression guard. Upstream now
+decodes several tiles per decoder call, so the fake decoder handles any batch size.
 """
 
 import sys
@@ -37,7 +42,7 @@ def make_vae():
     vae.tile_size = 256
     vae.tile_overlap_min = 64
 
-    def fake_decode(zt):
+    def fake_one(zt):
         # zt[:, 0] / zt[:, 1] carry global latent row / col; build pixels from them.
         rows = zt[0, 0, 0, :, 0]
         cols = zt[0, 1, 0, 0, :]
@@ -47,6 +52,10 @@ def make_vae():
         offset = 0.25 * float(rows[0]) + 0.5 * float(cols[0]) / 7.0  # differs per tile
         img = base + offset
         return img.expand(1, 3, zt.shape[2], *img.shape).clone()
+
+    def fake_decode(zt):
+        # upstream may stack several same-size tiles on the batch axis; decode each one
+        return torch.cat([fake_one(zt[b:b + 1]) for b in range(zt.shape[0])])
 
     vae._decode_pixels = fake_decode
     return vae, fake_decode

@@ -4,7 +4,7 @@ ARG BASE_IMAGE=nvcr.io/nvidia/pytorch:25.12-py3
 FROM --platform=linux/arm64 ${BASE_IMAGE}
 
 ARG BASE_IMAGE=nvcr.io/nvidia/pytorch:25.12-py3
-ARG COMFYUI_SHA=b78cec879b9460d5cb25228a83a942fb78d2cd24
+ARG COMFYUI_SHA=a277b5bf213e8a44fa34817b7770b54f86ef4cea
 ARG KJNODES_SHA=3f20054214fec9f9234fd3841ae6f1e4287948f6
 ARG SOL_ATTN_SHA=930a4d6e432ff8b8ed5e30ff2f72519b92d69bdf
 ARG FBC_SHA=725973c3bfd9de6dce249bc93dc5fe27f820df31
@@ -26,7 +26,7 @@ SHELL ["/bin/bash", "-c"]
 
 RUN mkdir -p /opt/h3
 
-# Pin ComfyUI. Do not float on master.
+# Pin ComfyUI (v0.46.0, 2026-11-18; was b78cec87 / 0.33.0 until 2026-11-20). Do not float on master.
 RUN set -euxo pipefail; \
     start=$(date +%s.%N); \
     git clone --filter=blob:none https://github.com/comfyanonymous/ComfyUI.git /opt/ComfyUI; \
@@ -161,18 +161,16 @@ if bad:
 print("no baked MiniMax weight files")
 PY
 
-# Backport upstream ComfyUI fc584aaa (Comfy-Org/ComfyUI#16436, merged 2026-09-22) onto the pin:
-# the pinned H3 VAE tiled_decode blended each tile against its neighbours' raw edges, leaving a
-# step at every tile intersection (6 per frame at 960x544, then enlarged by SPAN). Late layer so
-# the SageAttention / torchaudio builds above stay cached. The CPU test fails the build unless the
-# decode equals the separable overlap-add reference.
+# The H3 VAE tile-blend fix (upstream fc584aaa, Comfy-Org/ComfyUI#16436) is part of the v0.46.0
+# pin, so the old backport patch is gone. Its CPU test stays as a regression guard: the build
+# fails unless the pinned tiled_decode equals the separable overlap-add reference (a step at every
+# tile intersection would otherwise be enlarged by SPAN). Late layer, after the expensive builds.
 COPY deploy/patches /opt/h3/patches
 RUN set -euxo pipefail; \
     cd /opt/ComfyUI; \
-    patch -p1 --forward --fuzz=0 < /opt/h3/patches/comfyui-h3-vae-tile-blend.patch; \
-    grep -q 'Backport of upstream ComfyUI fc584aaa' comfy/ldm/minimax/vae.py; \
+    grep -q 'Tiles blend against' comfy/ldm/minimax/vae.py; \
     python /opt/h3/patches/test_h3_vae_tile_blend.py
-LABEL comfyui.patches="h3-vae-tile-blend(fc584aaa)"
+LABEL comfyui.patches="none (h3-vae-tile-blend fc584aaa is upstream in v0.46.0)"
 
 COPY scripts /opt/h3/scripts
 COPY workflows /opt/h3/workflows

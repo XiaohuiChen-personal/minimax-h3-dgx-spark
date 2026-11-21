@@ -112,6 +112,25 @@ Nodes the FL2VA graphs must use:
 
 Prompt: start with the official alignment line ([`../design/prompting.md`](../design/prompting.md)). `<Picture 1>` is the first attached keyframe. A keyframe is a real frame of the shot. Identity sheets are Ref2VA `--ref-image`.
 
+## Ref2VA + an exact frame (`MiniMaxH3AddGuide`)
+
+Use this when one clip needs both identity stills and an exact frame: the video must open on a given picture, or pass through one at a set time. It is the pattern of Comfy-Org's "MiniMax H3: Multiframe Reference" template. It needs the ComfyUI v0.46.0 pin (2026-11-20). No shipped graph has the node, so add it to a copy:
+
+1. Pass the frame still as one more `--ref-image` (say it is the 7th, so `ref_image_6`, LoadImage node `30` in the shipped Ref2VA graphs). The text encoder only sees it as `<Picture 7>`; the guide alone is invisible to the prompt.
+2. Add the node and route the guider through it:
+   ```json
+   "90": {"class_type": "MiniMaxH3AddGuide",
+          "inputs": {"positive": ["10", 0], "vae": ["3", 0], "latent": ["10", 1], "image": ["30", 0], "frame_idx": 0}}
+   ```
+   and set node `14` (`BasicGuider`) `conditioning` to `["90", 0]`. `frame_idx` is a pixel frame (`round(seconds × 24)`; negative counts from the end). Chain one node per anchor. The image is cover-cropped to the canvas.
+3. Prompt (official ref guide §2.2–§4): tag `[keyframe completion + reference generation]`; a standalone line `<Picture 7> is the first frame of [Shot 1]: …` describing what the still shows; `The shot begins exactly from <Picture 7>.` at the start of `[Shot 1]`; retention `<Picture 7> ([Shot 1] first frame): fully_preserved - …`.
+4. `submit-prompt.sh` needs no change: `--ref-image` wires the LoadImage, and the guide reads the same node.
+
+Measured 2026-11-20 on the fast locked-audio graph (384×672 → 768×1344, 8 stills, seeds 42 / 2026; `measurements/comfyui-v0.46-upgrade-2026-11-20.md`):
+- frame 0 has the still's composition. It is regenerated, not pasted: MAE 10 against the cover-cropped still, slightly darker (mean red 69 vs 78), fewer fine details;
+- a locked soundtrack stays locked (render audio vs WAV corr 0.98);
+- speed is unchanged (8.4 s/step at 124 frames; 15.08 s with 8 stills ≈ 14.4 min).
+
 ## Free fields the submit script may patch
 
 - text prompt (`--prompt-file` for the structured multi-line format)
@@ -121,6 +140,6 @@ Prompt: start with the official alignment line ([`../design/prompting.md`](../de
 - optional `--first-frame` / `--last-frame` local files (keyframe graphs only; uploaded and linked)
 - `--soundtrack` local WAV (locked-audio graphs only; checked, uploaded, required there)
 
-Canvas, steps, length, LoRA on/off, and extra nodes may change on a **copy** or a new file when the use case needs it. 3-view sheets are Ref2VA `--ref-image`, **not** `first_frame`.
+Canvas, steps, length, LoRA on/off, and extra nodes may change on a **copy** or a new file when the use case needs it. 3-view sheets are Ref2VA `--ref-image`, **not** `first_frame`. An exact frame plus identity stills is a Ref2VA copy with `MiniMaxH3AddGuide` (section above), not the FL2VA keyframe graph.
 
 See [`../design/operator.md`](../design/operator.md) and [`../design/decisions.md`](../design/decisions.md).

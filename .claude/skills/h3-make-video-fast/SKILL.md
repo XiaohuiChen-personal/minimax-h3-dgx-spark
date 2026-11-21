@@ -71,6 +71,8 @@ Do not add an `ImageScale` after SPAN. SPAN is exactly 2x, and a fixed size lock
 
 **No identity stills.** These are Ref2VA graphs and need 1–9 stills. With none, follow SLOW's routing (FL2VA, Turbo 8-step) and say so.
 
+**An exact opening frame** (the user gives a scene picture "as the first frame", or a frame the clip must pass through): keep the Ref2VA graph, attach the picture as one more `--ref-image`, and add `MiniMaxH3AddGuide` on that `ref_image_K` LoadImage (`workflows/README.md` § Ref2VA + an exact frame). Tested 2026-11-20 on the locked-audio graph (《无限月读》, 8 stills, two 15.08 s seeds, ~14.4 min each): frame 0 had the picture's composition, regenerated a little darker; the soundtrack stayed locked. Make a 124-frame pilot first when the opening matters (~4–5 min).
+
 **Submit** (remote from the Mac; every value literal, as in SLOW):
 
 ```bash

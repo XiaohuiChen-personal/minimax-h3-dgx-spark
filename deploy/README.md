@@ -7,7 +7,7 @@ Pins recorded at implement time (Task 1 / Task 5 / Task 9). Do not float on `mas
 | Pin | Value |
 |---|---|
 | `BASE_IMAGE` | `nvcr.io/nvidia/pytorch:25.12-py3` |
-| `COMFYUI_SHA` | `b78cec879b9460d5cb25228a83a942fb78d2cd24` |
+| `COMFYUI_SHA` | `a277b5bf213e8a44fa34817b7770b54f86ef4cea` (tag `v0.46.0`, 2026-11-18; before 2026-11-20: `b78cec87`, 0.33.0) |
 | `SPAN_FILE` | `upscale_models/2x-spanx2-ch48.pth` |
 | Image | `h3-spark:local` |
 | Platform | `linux/arm64` |
@@ -15,7 +15,7 @@ Pins recorded at implement time (Task 1 / Task 5 / Task 9). Do not float on `mas
 | KJNodes | `kijai/ComfyUI-KJNodes` @ `3f20054214fec9f9234fd3841ae6f1e4287948f6` |
 | Sol-Attn | `Saganaki22/ComfyUI-sol-attn` @ `930a4d6e432ff8b8ed5e30ff2f72519b92d69bdf` (triton-ref pack) |
 | FirstBlockCache | `duckyshell/ComfyUI-MiniMaxH3-FirstBlockCache` @ `725973c3bfd9de6dce249bc93dc5fe27f820df31` (`ApplyMiniMaxH3FirstBlockCache`, `H3 Safe`) |
-| ComfyUI patch | [`patches/comfyui-h3-vae-tile-blend.patch`](patches/comfyui-h3-vae-tile-blend.patch) — backport of upstream `fc584aaa` ([Comfy-Org/ComfyUI#16436](https://github.com/Comfy-Org/ComfyUI/pull/16436)); build fails unless [`patches/test_h3_vae_tile_blend.py`](patches/test_h3_vae_tile_blend.py) passes |
+| ComfyUI patch | none since v0.46.0 — the H3 VAE tile-blend fix `fc584aaa` ([Comfy-Org/ComfyUI#16436](https://github.com/Comfy-Org/ComfyUI/pull/16436)) is upstream; the build still fails unless [`patches/test_h3_vae_tile_blend.py`](patches/test_h3_vae_tile_blend.py) passes |
 
 Official SageAttention 2.2.0 `SUPPORTED_ARCHS` includes `12.0` and not `12.1`. The image compiles with `TORCH_CUDA_ARCH_LIST=12.0` (sm_120 SASS; the documented GB10 path for unmodified 2.2.0). The `sageattention3_blackwell` tree is deleted before `pip install` so SageAttention 3 is not in the image.
 
@@ -75,10 +75,12 @@ SaveVideo writes a suffixed host path under `$HOME/h3-output` (for example `defa
 
 ## ComfyUI patches on top of the pin
 
-The pin stays `b78cec87` (D-11). Upstream fixes that matter for quality are **backported as patch files** in [`patches/`](patches/) and applied in a late Dockerfile layer, so the SageAttention / torchaudio builds stay cached and the rest of the tested stack does not move.
+The pin is `v0.46.0` (D-11; moved from `b78cec87` on 2026-11-20 at the operator's request, so the Ref2VA + `MiniMaxH3AddGuide` multiframe workflow runs on the version Comfy-Org documents for it, 0.34.0+, with every upstream H3 fix since August). Upstream fixes that matter for quality and are not yet in the pin are **backported as patch files** in [`patches/`](patches/) and applied in a late Dockerfile layer, so the SageAttention / torchaudio builds stay cached.
 
-| Patch | Upstream | Why |
+There is no patch today. The one earlier backport is upstream in v0.46.0:
+
+| Former patch | Upstream | Why it mattered |
 |---|---|---|
-| `comfyui-h3-vae-tile-blend.patch` | `fc584aaa` / #16436 (merged 2026-09-22) | The pinned H3 VAE `tiled_decode` blended each tile against its neighbours' **raw** edges, leaving a step at every tile intersection (3×4 tiles → 6 crossings per frame at 960×544; SPAN 2× then enlarges them). The patched loop blends against already-blended neighbours. The CPU test checks the real pinned class against a separable overlap-add reference: unpatched max error 2.75, patched 5e-15. |
+| `comfyui-h3-vae-tile-blend.patch` (removed) | `fc584aaa` / #16436 (merged 2026-09-22) | The old pinned H3 VAE `tiled_decode` blended each tile against its neighbours' **raw** edges, leaving a step at every tile intersection (3×4 tiles → 6 crossings per frame at 960×544; SPAN 2× then enlarges them). Upstream blends against already-blended neighbours. The CPU test checks the real pinned class against a separable overlap-add reference (old pin unpatched: max error 2.75; fixed: 5e-15) and still runs in every build. |
 
-An image built before this patch still has the seam bug. Rebuild (`docker compose -f deploy/compose.yaml build`) and recreate the container to pick it up — only when the operator asks, because recreating restarts ComfyUI.
+A pin change rebuilds every layer after the ComfyUI clone (SageAttention and torchaudio included). Rebuild (`docker compose -f deploy/compose.yaml build`) and recreate the container only when the operator asks, because recreating restarts ComfyUI.

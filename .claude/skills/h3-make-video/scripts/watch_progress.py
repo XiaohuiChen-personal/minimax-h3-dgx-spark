@@ -5,7 +5,7 @@ Run it in the background with --window 600 and relaunch it each time it exits wh
 running. It exits early when the job finishes, fails, or vanishes, so the last line is always the newest
 state.
 
-Where the numbers come from (ComfyUI b78cec87):
+Where the numbers come from (ComfyUI b78cec87; rechecked live on v0.46.0, 2026-11-20):
   - step progress: websocket "progress" events {value, max, prompt_id, node}. They reach every listener
     because submit-prompt.py queues without a client_id.
   - finished / failed: GET /history/<prompt_id>. With no client_id ComfyUI does NOT broadcast

@@ -96,6 +96,7 @@ Operator notes from the monk-parakeet identity runs. Not a product change. Locke
 4. **Do not read a 20-step job as no-Turbo unless the LoRA node is gone.** `bb553ec1` was 20 steps **with** Ref2V Turbo still loaded on the 15.08 s 960×544 graph; interrupted at 19/20 after **582.55 s**.
 
 5. **Ref2VA and first-frame FL2VA / I2VA are mutually exclusive.** Official API: first-frame and Omni Reference do not stack. `yard-fight-8s` locked the yard as `first_frame`; the yellow bird could only be text. `MiniMaxH3AddGuide` would pin a still onto a frame and break the shot.
+   **Superseded on ComfyUI (2026-11-20, v0.46.0):** the *graphs* above cannot combine, but a Ref2VA graph plus `MiniMaxH3AddGuide` at `frame_idx` 0 does: identity from the stills and the opening frame from the guide, in the same clip (`measurements/comfyui-v0.46-upgrade-2026-11-20.md`, recipe in `workflows/README.md`). The API statement still holds for the hosted API.
 
 6. **Ref2VA = up to 9 separate images, 1-based `<Picture N>`.** Official example is “appearance follows images 1 and 2.” There is **no** official rule that a 3-view sheet is required. A whole Front/Side/Back sheet as one image can copy the grid, the printed captions, and duplicate one bird. Product smokes used **six per-view stills**. v6 feeds **two whole sheets** on purpose (`<Picture 1>` blue, `<Picture 2>` yellow). Identity stills are `--ref-image`, not `first_frame`.
 
